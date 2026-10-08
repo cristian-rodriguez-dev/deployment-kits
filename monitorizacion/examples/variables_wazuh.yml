@@ -1,0 +1,14 @@
+---
+# Copiar y adaptar en las variables del grupo wazuh_servers de AWX.
+
+# wazuh_install_dir: /ruta/absoluta/wazuh-docker
+# wazuh_dashboard_port: 443
+# wazuh_project_name: single-node
+# wazuh_version: "4.14.8"
+
+# Las contraseñas se proporcionan mediante la credencial de AWX:
+# WAZUH_ADMIN_PASSWORD
+# WAZUH_API_PASSWORD
+
+# Este playbook no realiza actualizaciones de versión
+# ni rotaciones de contraseña sobre instalaciones existentes.

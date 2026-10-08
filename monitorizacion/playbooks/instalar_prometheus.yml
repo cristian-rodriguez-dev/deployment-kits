@@ -1,0 +1,195 @@
+---
+- name: Instalar Prometheus y Node Exporter
+  hosts: prometheus_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Comprobar las variables necesarias
+      ansible.builtin.assert:
+        that:
+          - prometheus_install_dir is defined
+          - prometheus_project_name is defined
+          - monitorizacion_network is defined
+          - prometheus_image is defined
+          - node_exporter_image is defined
+          - prometheus_port is defined
+          - node_exporter_port is defined
+          - prometheus_retention is defined
+          - prometheus_scrape_interval is defined
+          - prometheus_local_name is defined
+          - prometheus_departamentos is defined
+        fail_msg: >-
+          Faltan variables de Prometheus.
+          Configúralas en el grupo prometheus_servers de AWX.
+
+    - name: Comprobar sistema operativo
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+        fail_msg: Este playbook está preparado para Ubuntu.
+
+    - name: Validar directorio de instalación
+      ansible.builtin.assert:
+        that:
+          - prometheus_install_dir is match('^/')
+          - prometheus_install_dir != '/'
+        fail_msg: Indica una ruta absoluta válida para instalar Prometheus.
+
+    - name: Validar puertos
+      ansible.builtin.assert:
+        that:
+          - (prometheus_port | string) is match('^[0-9]+$')
+          - (node_exporter_port | string) is match('^[0-9]+$')
+          - prometheus_port | int >= 1
+          - prometheus_port | int <= 65535
+          - node_exporter_port | int >= 1
+          - node_exporter_port | int <= 65535
+          - (prometheus_port | int) != (node_exporter_port | int)
+        fail_msg: Los puertos deben ser válidos y diferentes.
+
+    - name: Comprobar que Docker funciona
+      ansible.builtin.command:
+        argv:
+          - docker
+          - info
+      changed_when: false
+
+    - name: Comprobar Docker Compose
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - version
+          - --short
+      register: prometheus_compose_version
+      changed_when: false
+
+    - name: Comprobar versión mínima de Compose
+      ansible.builtin.assert:
+        that:
+          - >-
+            (prometheus_compose_version.stdout | trim
+            | regex_replace('^v', ''))
+            is version('2.18.0', '>=')
+        fail_msg: Se necesita Docker Compose 2.18.0 o posterior.
+
+  tasks:
+    - name: Instalar dependencia de los módulos Docker
+      ansible.builtin.apt:
+        name: python3-requests
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Crear directorios de configuración
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ prometheus_install_dir }}"
+        - "{{ prometheus_install_dir }}/prometheus"
+
+    - name: Crear directorio persistente para las métricas
+      ansible.builtin.file:
+        path: "{{ prometheus_install_dir }}/data"
+        state: directory
+        owner: "65534"
+        group: "65534"
+        mode: "0750"
+
+    - name: Crear la red compartida con Grafana
+      community.docker.docker_network:
+        name: "{{ monitorizacion_network }}"
+        state: present
+
+    - name: Descargar las imágenes si no existen
+      community.docker.docker_image:
+        name: "{{ item }}"
+        source: pull
+        state: present
+      loop:
+        - "{{ prometheus_image }}"
+        - "{{ node_exporter_image }}"
+
+    - name: Generar y validar la configuración de Prometheus
+      ansible.builtin.template:
+        src: ../templates/prometheus/prometheus.yml.j2
+        dest: "{{ prometheus_install_dir }}/prometheus/prometheus.yml"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        validate: >-
+          docker run --rm
+          --network none
+          --user 0:0
+          --entrypoint /bin/promtool
+          --volume %s:/tmp/prometheus.yml:ro
+          {{ prometheus_image }}
+          check config /tmp/prometheus.yml
+      notify: Recargar configuración de Prometheus
+
+    - name: Generar y validar Docker Compose
+      ansible.builtin.template:
+        src: ../templates/prometheus/docker-compose.yml.j2
+        dest: "{{ prometheus_install_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        validate: >-
+          docker compose
+          --project-name {{ prometheus_project_name }}
+          -f %s config --quiet
+
+    - name: Arrancar los servicios conservando los datos
+      community.docker.docker_compose_v2:
+        project_src: "{{ prometheus_install_dir }}"
+        project_name: "{{ prometheus_project_name }}"
+        state: present
+        pull: missing
+        recreate: auto
+
+    - name: Esperar a que Prometheus esté preparado
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ prometheus_port }}/-/ready"
+        status_code: 200
+      register: prometheus_ready
+      until: (prometheus_ready.status | default(0)) == 200
+      retries: 30
+      delay: 5
+
+    - name: Aplicar los cambios pendientes de configuración
+      ansible.builtin.meta: flush_handlers
+
+    - name: Comprobar que Node Exporter responde
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_exporter_port }}/metrics"
+        status_code: 200
+      register: node_exporter_ready
+      until: (node_exporter_ready.status | default(0)) == 200
+      retries: 12
+      delay: 5
+
+    - name: Mostrar resultado
+      ansible.builtin.debug:
+        msg: Prometheus y Node Exporter responden correctamente.
+
+  handlers:
+    - name: Recargar configuración de Prometheus
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-name
+          - "{{ prometheus_project_name }}"
+          - kill
+          - --signal
+          - SIGHUP
+          - prometheus
+        chdir: "{{ prometheus_install_dir }}"
+      changed_when: true
