@@ -1,0 +1,30 @@
+global:
+  scrape_interval: {{ prometheus_scrape_interval | to_json }}
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets:
+          - "localhost:9090"
+
+  - job_name: "node-exporter-local"
+    static_configs:
+      - targets:
+          - "host.docker.internal:{{ node_exporter_port }}"
+        labels:
+          nodename: {{ prometheus_local_name | to_json }}
+
+{% for departamento in prometheus_departamentos %}
+  - job_name: {{ departamento.nombre | to_json }}
+{% if departamento.equipos | length > 0 %}
+    static_configs:
+{% for equipo in departamento.equipos %}
+      - targets:
+          - {{ (equipo.direccion ~ ':' ~ (equipo.puerto | default(9100) | string)) | to_json }}
+        labels:
+          nodename: {{ equipo.nombre | to_json }}
+{% endfor %}
+{% else %}
+    static_configs: []
+{% endif %}
+{% endfor %}
