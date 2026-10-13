@@ -19,7 +19,7 @@
     # Detecta cambios de contraseña entre ejecuciones.
     wazuh_credentials_fingerprint: >-
       {{
-        [wazuh_admin_password, wazuh_api_password]
+        [wazuh_admin_username, wazuh_admin_password, wazuh_api_password]
         | to_json
         | hash('sha256')
       }}
