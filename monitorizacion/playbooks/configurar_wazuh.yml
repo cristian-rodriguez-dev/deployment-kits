@@ -1,6 +1,6 @@
 ---
 - name: Configurar apariencia y zona horaria de Wazuh
-  hosts: wazuh_servers
+  hosts: wazuh-servers
   become: true
   gather_facts: false
 
