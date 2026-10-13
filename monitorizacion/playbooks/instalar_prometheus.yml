@@ -133,6 +133,14 @@
           check config /tmp/prometheus.yml
       notify: Recargar configuración de Prometheus
 
+    - name: Comprobar contenido renderizado de Compose
+      ansible.builtin.debug:
+        msg: >-
+          Caracteres:
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../templates/prometheus/docker-compose.yml.j2')
+             | length }}
+             
     - name: Generar y validar Docker Compose
       ansible.builtin.template:
         src: ../templates/prometheus/docker-compose.yml.j2
