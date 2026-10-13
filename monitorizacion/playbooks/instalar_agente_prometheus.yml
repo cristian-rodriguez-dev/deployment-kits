@@ -47,7 +47,7 @@
         block: |
           - job_name: "node-exporter-remotos"
             static_configs:
-          {% for host in groups['monitoring_agents'] %}
+          {% for host in groups['monitoring-agents'] %}
               - targets:
                   - "{{ hostvars[host].ansible_host | default(host) }}:{{ hostvars[host].node_exporter_port | default(node_exporter_default_port) }}"
                 labels:
