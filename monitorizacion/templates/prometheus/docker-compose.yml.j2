@@ -1,0 +1,47 @@
+services:
+  prometheus:
+    image: {{ prometheus_image | to_json }}
+    user: "65534:65534"
+    restart: unless-stopped
+
+    ports:
+      - "{{ prometheus_port }}:9090"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - "{{ prometheus_install_dir }}/prometheus:/etc/prometheus:ro"
+      - "{{ prometheus_install_dir }}/data:/prometheus"
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time={{ prometheus_retention }}"
+
+    networks:
+      red_monitorizacion:
+        aliases:
+          - prometheus
+
+    depends_on:
+      - node-exporter
+
+  node-exporter:
+    image: {{ node_exporter_image | to_json }}
+    restart: unless-stopped
+
+    network_mode: host
+    pid: host
+
+    volumes:
+      - "/:/host:ro,rslave"
+
+    command:
+      - "--path.rootfs=/host"
+      - "--web.listen-address=:{{ node_exporter_port }}"
+
+networks:
+  red_monitorizacion:
+    name: {{ monitorizacion_network | to_json }}
+    external: true
