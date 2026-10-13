@@ -1,64 +1,163 @@
 ---
-- name: Configurar agente Wazuh
-  hosts: wazuh-agents
+- name: Instalar agentes de monitorización Wazuh
+  hosts: monitoring-agents
   become: true
-  gather_facts: false
+  gather_facts: true
 
   vars:
-    wazuh_manager_ip: "{{ wazuh_server_ip }}"
+    node_exporter_port: 9100
+
+  pre_tasks:
+    - name: Comprobar variables necesarias
+      ansible.builtin.assert:
+        that:
+          - wazuh_manager_ip is defined
+          - wazuh_manager_ip | length > 0
+        fail_msg: >-
+          Debes definir wazuh_manager_ip en las variables
+          del inventario o grupo de AWX.
+
+    - name: Comprobar sistema operativo
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+        fail_msg: >-
+          Este playbook está preparado solo para Ubuntu.
 
   tasks:
+    - name: Instalar dependencias para el repositorio Wazuh
+      ansible.builtin.apt:
+        name:
+          - gnupg
+          - apt-transport-https
+          - curl
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Descargar clave GPG de Wazuh
+      ansible.builtin.get_url:
+        url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+        dest: /usr/share/keyrings/wazuh.asc
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Añadir repositorio de Wazuh
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by=/usr/share/keyrings/wazuh.asc]
+          https://packages.wazuh.com/4.x/apt/ stable main
+        filename: wazuh
+        state: present
+        update_cache: true
+
+    - name: Instalar Wazuh Agent
+      ansible.builtin.apt:
+        name: wazuh-agent
+        state: present
+      environment:
+        WAZUH_MANAGER: "{{ wazuh_manager_ip }}"
+        WAZUH_AGENT_NAME: "{{ inventory_hostname }}"
+      notify: Reiniciar Wazuh Agent
+
     - name: Comprobar que existe ossec.conf
       ansible.builtin.stat:
         path: /var/ossec/etc/ossec.conf
       register: wazuh_ossec_conf
 
-    - name: Detener si no existe ossec.conf
+    - name: Validar instalación de Wazuh Agent
       ansible.builtin.assert:
         that:
           - wazuh_ossec_conf.stat.exists
-        fail_msg: "No existe /var/ossec/etc/ossec.conf. ¿Está instalado wazuh-agent?"
+        fail_msg: >-
+          Wazuh Agent parece instalado pero no existe
+          /var/ossec/etc/ossec.conf.
 
-    - name: Crear copia de seguridad de ossec.conf
-      ansible.builtin.copy:
-        src: /var/ossec/etc/ossec.conf
-        dest: /var/ossec/etc/ossec.conf.bak
-        remote_src: true
-        owner: root
-        group: root
-        mode: "0640"
-        force: false
-
-    - name: Configurar address del manager
+    - name: Configurar dirección del Wazuh Manager
       ansible.builtin.replace:
         path: /var/ossec/etc/ossec.conf
+        after: '<client>'
+        before: '</client>'
         regexp: '(<address>)[^<]*(</address>)'
         replace: '\g<1>{{ wazuh_manager_ip }}\g<2>'
-      notify: Reiniciar agente Wazuh
+        backup: true
+      notify: Reiniciar Wazuh Agent
 
     - name: Configurar manager_address si existe
       ansible.builtin.replace:
         path: /var/ossec/etc/ossec.conf
+        after: '<client>'
+        before: '</client>'
         regexp: '(<manager_address>)[^<]*(</manager_address>)'
         replace: '\g<1>{{ wazuh_manager_ip }}\g<2>'
-      notify: Reiniciar agente Wazuh
+      notify: Reiniciar Wazuh Agent
 
-    - name: Aplicar cambios pendientes
-      ansible.builtin.meta: flush_handlers
-
-    - name: Comprobar estado del agente
+    - name: Habilitar Wazuh Agent
       ansible.builtin.systemd:
         name: wazuh-agent
-        state: started
         enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Instalar Node Exporter
+      ansible.builtin.apt:
+        name: prometheus-node-exporter
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Habilitar Node Exporter
+      ansible.builtin.systemd:
+        name: prometheus-node-exporter
+        enabled: true
+        state: started
+
+    - name: Esperar a que Node Exporter responda
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_exporter_port }}/metrics"
+        method: GET
+        status_code: 200
+        return_content: false
+      register: node_exporter_health
+      retries: 10
+      delay: 2
+      until: node_exporter_health.status == 200
+
+    - name: Aplicar reinicios pendientes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Comprobar Wazuh Agent
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - wazuh-agent
+      register: wazuh_agent_status
+      changed_when: false
+
+    - name: Comprobar Node Exporter
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - prometheus-node-exporter
+      register: node_exporter_status
+      changed_when: false
 
     - name: Mostrar resultado
       ansible.builtin.debug:
-        msg: "Agente Wazuh configurado contra {{ wazuh_manager_ip }}."
+        msg:
+          - "Equipo: {{ inventory_hostname }}"
+          - "Wazuh Manager: {{ wazuh_manager_ip }}"
+          - "Wazuh Agent: {{ wazuh_agent_status.stdout }}"
+          - "Node Exporter: {{ node_exporter_status.stdout }}"
+          - "Node Exporter puerto: {{ node_exporter_port }}"
 
   handlers:
-    - name: Reiniciar agente Wazuh
+    - name: Reiniciar Wazuh Agent
       ansible.builtin.systemd:
         name: wazuh-agent
         state: restarted
         enabled: true
+        daemon_reload: true

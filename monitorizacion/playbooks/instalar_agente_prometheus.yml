@@ -13,12 +13,12 @@
         that:
           - prometheus_install_dir is defined
           - prometheus_project_name is defined
-          - groups['monitoring_agents'] is defined
-          - groups['monitoring_agents'] | length > 0
+          - groups['monitoring-agents'] is defined
+          - groups['monitoring-agents'] | length > 0
         fail_msg: >-
-          Debes definir primero prometheus_install_dir,
+          Define primero prometheus_install_dir,
           prometheus_project_name y tener equipos
-          en el grupo monitoring_agents.
+          en el grupo monitoring-agents.
 
     - name: Definir ruta del archivo Prometheus
       ansible.builtin.set_fact:
@@ -47,7 +47,7 @@
         block: |
           - job_name: "node-exporter-remotos"
             static_configs:
-          {% for host in groups['monitoring_agents'] %}
+          {% for host in groups['monitoring-agents'] %}
               - targets:
                   - "{{ hostvars[host].ansible_host | default(host) }}:{{ hostvars[host].node_exporter_port | default(node_exporter_default_port) }}"
                 labels:
@@ -95,7 +95,7 @@
       ansible.builtin.debug:
         msg: >-
           Prometheus configurado con
-          {{ groups['monitoring_agents'] | length }}
+          {{ groups['monitoring-agents'] | length }}
           equipo(s) remoto(s).
 
   handlers:
