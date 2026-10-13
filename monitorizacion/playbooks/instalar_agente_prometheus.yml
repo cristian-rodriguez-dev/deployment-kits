@@ -1,0 +1,108 @@
+---
+- name: Configurar agentes remotos de Prometheus
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    node_exporter_default_port: 9100
+
+  pre_tasks:
+    - name: Comprobar variables necesarias
+      ansible.builtin.assert:
+        that:
+          - prometheus_install_dir is defined
+          - prometheus_project_name is defined
+          - groups['monitoring_agents'] is defined
+          - groups['monitoring_agents'] | length > 0
+        fail_msg: >-
+          Debes definir primero prometheus_install_dir,
+          prometheus_project_name y tener equipos
+          en el grupo monitoring_agents.
+
+    - name: Definir ruta del archivo Prometheus
+      ansible.builtin.set_fact:
+        prometheus_config_file: >-
+          {{ prometheus_install_dir }}/prometheus/prometheus.yml
+
+    - name: Comprobar prometheus.yml
+      ansible.builtin.stat:
+        path: "{{ prometheus_config_file }}"
+      register: prometheus_config
+
+    - name: Validar prometheus.yml
+      ansible.builtin.assert:
+        that:
+          - prometheus_config.stat.exists
+        fail_msg: >-
+          No se encuentra el archivo: {{ prometheus_config_file }}.
+
+  tasks:
+    - name: Configurar Node Exporters remotos
+      ansible.builtin.blockinfile:
+        path: "{{ prometheus_config_file }}"
+        insertafter: '^scrape_configs:'
+        marker: "  # {mark} AWX NODE EXPORTER TARGETS"
+        backup: true
+        block: |
+          - job_name: "node-exporter-remotos"
+            static_configs:
+          {% for host in groups['monitoring_agents'] %}
+              - targets:
+                  - "{{ hostvars[host].ansible_host | default(host) }}:{{ hostvars[host].node_exporter_port | default(node_exporter_default_port) }}"
+                labels:
+                  nodename: "{{ host }}"
+                  departamento: "{{ hostvars[host].departamento | default('sin-departamento') | replace(' ', '-') }}"
+          {% endfor %}
+      notify: Reiniciar Prometheus
+
+    - name: Validar configuración de Prometheus
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-name
+          - "{{ prometheus_project_name }}"
+          - -f
+          - "{{ prometheus_install_dir }}/docker-compose.yml"
+          - exec
+          - -T
+          - prometheus
+          - promtool
+          - check
+          - config
+          - /etc/prometheus/prometheus.yml
+      register: prometheus_validation
+      changed_when: false
+
+    - name: Mostrar validación
+      ansible.builtin.debug:
+        var: prometheus_validation.stdout_lines
+
+    - name: Aplicar cambios pendientes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Esperar a Prometheus
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/-/ready"
+        status_code: 200
+      register: prometheus_ready
+      retries: 15
+      delay: 2
+      until: prometheus_ready.status == 200
+
+    - name: Mostrar equipos configurados
+      ansible.builtin.debug:
+        msg: >-
+          Prometheus configurado con
+          {{ groups['monitoring_agents'] | length }}
+          equipo(s) remoto(s).
+
+  handlers:
+    - name: Reiniciar Prometheus
+      community.docker.docker_compose_v2:
+        project_src: "{{ prometheus_install_dir }}"
+        project_name: "{{ prometheus_project_name }}"
+        services:
+          - prometheus
+        state: restarted
