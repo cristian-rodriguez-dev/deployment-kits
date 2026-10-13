@@ -19,7 +19,7 @@
     # Detecta cambios de contraseña entre ejecuciones.
     wazuh_credentials_fingerprint: >-
       {{
-        [wazuh_admin_username, wazuh_admin_password, wazuh_api_password]
+        [wazuh_admin_password, wazuh_api_password]
         | to_json
         | hash('sha256')
       }}
@@ -48,7 +48,6 @@
           - wazuh_install_dir is match('^/')
           - wazuh_install_dir != '/'
         fail_msg: Indica una ruta absoluta válida para instalar Wazuh.
-# WazuhAdminPass2026!
     - name: Validar los requisitos de las contraseñas
       ansible.builtin.assert:
         that:
@@ -148,6 +147,15 @@
       when: not wazuh_state.stat.exists
 
   tasks:
+    - name: Comprobar usuario efectivo
+      ansible.builtin.command: whoami
+      register: usuario_efectivo
+      changed_when: false
+
+    - name: Mostrar usuario efectivo
+      ansible.builtin.debug:
+        var: usuario_efectivo.stdout
+
     - name: Instalar Git
       ansible.builtin.apt:
         name: git
