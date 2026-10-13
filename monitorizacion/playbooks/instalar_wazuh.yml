@@ -78,11 +78,11 @@
         argv:
           - docker
           - info
+      become: true
       changed_when: false
 
     - name: Comprobar Docker Compose
       ansible.builtin.command:
-      become: true
         argv:
           - docker
           - compose
