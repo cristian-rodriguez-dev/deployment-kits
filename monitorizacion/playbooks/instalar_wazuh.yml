@@ -1,6 +1,6 @@
 ---
 - name: Instalar Wazuh en Ubuntu
-  hosts: wazuh_servers
+  hosts: wazuh-servers
   become: true
   gather_facts: true
 
@@ -34,7 +34,7 @@
           - wazuh_version is defined
         fail_msg: >-
           Faltan variables de Wazuh.
-          Configúralas en el grupo wazuh_servers de AWX.
+          Configúralas en el grupo wazuh-servers de AWX.
 
     - name: Comprobar sistema operativo
       ansible.builtin.assert:

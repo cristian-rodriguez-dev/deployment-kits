@@ -1,6 +1,6 @@
 ---
 - name: Instalar Grafana y configurar Prometheus
-  hosts: grafana_servers
+  hosts: grafana-servers
   become: true
   gather_facts: true
 
@@ -37,7 +37,7 @@
           - grafana_prometheus_url is defined
         fail_msg: >-
           Faltan variables de Grafana.
-          Configúralas en el grupo grafana_servers del inventario de AWX.
+          Configúralas en el grupo grafana-servers del inventario de AWX.
 
     - name: Comprobar sistema operativo
       ansible.builtin.assert:

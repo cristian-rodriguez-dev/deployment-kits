@@ -1,6 +1,6 @@
 ---
 - name: Instalar Prometheus y Node Exporter
-  hosts: prometheus_servers
+  hosts: prometheus-servers
   become: true
   gather_facts: true
 
@@ -21,7 +21,7 @@
           - prometheus_departamentos is defined
         fail_msg: >-
           Faltan variables de Prometheus.
-          Configúralas en el grupo prometheus_servers de AWX.
+          Configúralas en el grupo prometheus-servers de AWX.
 
     - name: Comprobar sistema operativo
       ansible.builtin.assert:
