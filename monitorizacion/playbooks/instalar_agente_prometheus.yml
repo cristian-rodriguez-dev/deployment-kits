@@ -47,7 +47,7 @@
         block: |
           - job_name: "node-exporter-remotos"
             static_configs:
-          {% for host in groups['monitoring-agents'] %}
+          {% for host in groups['monitoring_agents'] %}
               - targets:
                   - "{{ hostvars[host].ansible_host | default(host) }}:{{ hostvars[host].node_exporter_port | default(node_exporter_default_port) }}"
                 labels:
@@ -55,6 +55,7 @@
                   departamento: "{{ hostvars[host].departamento | default('sin-departamento') | replace(' ', '-') }}"
           {% endfor %}
       notify: Reiniciar Prometheus
+
 
     - name: Validar configuración de Prometheus
       ansible.builtin.command:
