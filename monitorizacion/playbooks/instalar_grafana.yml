@@ -6,18 +6,17 @@
 
   vars:
     # El valor real lo inyecta la credencial de AWX.
-    grafana_admin_password: >-
+    var_grafana_admin_password: >-
       {{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASSWORD') }}
 
-    # Valores calculados a partir de las variables recibidas.
-    grafana_state_file: "{{ grafana_install_dir }}/.awx-initialized"
+    var_grafana_state_file: "{{ var_grafana_install_dir }}/.awx-initialized"
 
-    grafana_credentials_fingerprint: >-
+    var_grafana_credentials_fingerprint: >-
       {{
         [
-          grafana_admin_user,
-          grafana_admin_email,
-          grafana_admin_password
+          var_grafana_admin_user,
+          var_grafana_admin_email,
+          var_grafana_admin_password
         ]
         | to_json
         | hash('sha256')
@@ -27,14 +26,15 @@
     - name: Comprobar que AWX proporciona las variables necesarias
       ansible.builtin.assert:
         that:
-          - grafana_install_dir is defined
-          - grafana_project_name is defined
-          - grafana_image is defined
-          - grafana_port is defined
-          - grafana_admin_user is defined
-          - grafana_admin_email is defined
-          - monitorizacion_network is defined
-          - grafana_prometheus_url is defined
+          - var_grafana_install_dir is defined
+          - var_grafana_access_group is defined
+          - var_grafana_project_name is defined
+          - var_grafana_image is defined
+          - var_grafana_port is defined
+          - var_grafana_admin_user is defined
+          - var_grafana_admin_email is defined
+          - var_monitorizacion_network is defined
+          - var_grafana_prometheus_url is defined
         fail_msg: >-
           Faltan variables de Grafana.
           Configúralas en el grupo grafana-servers del inventario de AWX.
@@ -48,19 +48,24 @@
     - name: Validar el directorio de instalación
       ansible.builtin.assert:
         that:
-          - grafana_install_dir is match('^/')
-          - grafana_install_dir != '/'
+          - var_grafana_install_dir is match('^/')
+          - var_grafana_install_dir != '/'
         fail_msg: Indica una ruta absoluta válida para instalar Grafana.
+
+    - name: Comprobar que existe el grupo de acceso
+      ansible.builtin.getent:
+        database: group
+        key: "{{ var_grafana_access_group }}"
 
     - name: Validar credenciales iniciales
       ansible.builtin.assert:
         that:
-          - grafana_admin_user | length > 0
-          - grafana_admin_email | length > 0
-          - grafana_admin_password | length >= 8
-          - grafana_admin_password == (grafana_admin_password | trim)
-          - "'\n' not in grafana_admin_password"
-          - "'\r' not in grafana_admin_password"
+          - var_grafana_admin_user | length > 0
+          - var_grafana_admin_email | length > 0
+          - var_grafana_admin_password | length >= 8
+          - var_grafana_admin_password == (var_grafana_admin_password | trim)
+          - "'\n' not in var_grafana_admin_password"
+          - "'\r' not in var_grafana_admin_password"
         fail_msg: >-
           Revisa el usuario, correo y la credencial de Grafana.
           La contraseña debe tener al menos 8 caracteres,
@@ -70,9 +75,9 @@
     - name: Validar puerto web
       ansible.builtin.assert:
         that:
-          - (grafana_port | string) is match('^[0-9]+$')
-          - grafana_port | int >= 1
-          - grafana_port | int <= 65535
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - var_grafana_port | int >= 1
+          - var_grafana_port | int <= 65535
         fail_msg: El puerto debe estar entre 1 y 65535.
 
     - name: Comprobar Docker
@@ -89,53 +94,55 @@
           - compose
           - version
           - --short
-      register: grafana_compose_version
+      register: var_grafana_compose_version
       changed_when: false
 
     - name: Comprobar versión mínima de Compose
       ansible.builtin.assert:
         that:
           - >-
-            (grafana_compose_version.stdout | trim
+            (var_grafana_compose_version.stdout | trim
             | regex_replace('^v', ''))
             is version('2.18.0', '>=')
         fail_msg: Se necesita Docker Compose 2.18.0 o posterior.
 
     - name: Comprobar si AWX ya preparó esta instalación
       ansible.builtin.stat:
-        path: "{{ grafana_state_file }}"
-      register: grafana_state
+        path: "{{ var_grafana_state_file }}"
+      register: var_grafana_state
 
     - name: Comprobar si hay una base de datos anterior
       ansible.builtin.stat:
-        path: "{{ grafana_install_dir }}/data/grafana.db"
-      register: grafana_database
+        path: "{{ var_grafana_install_dir }}/data/grafana.db"
+      register: var_grafana_database
 
     - name: Evitar adoptar automáticamente una instalación anterior
       ansible.builtin.assert:
         that:
-          - grafana_state.stat.exists or not grafana_database.stat.exists
+          - >-
+            var_grafana_state.stat.exists
+            or not var_grafana_database.stat.exists
         fail_msg: >-
           Existe una base de datos que no fue preparada por este playbook.
           Revisa su migración antes de continuar.
 
     - name: Leer huella de las credenciales iniciales
       ansible.builtin.slurp:
-        src: "{{ grafana_state_file }}"
-      register: grafana_saved_credentials
-      when: grafana_state.stat.exists
+        src: "{{ var_grafana_state_file }}"
+      register: var_grafana_saved_credentials
+      when: var_grafana_state.stat.exists
       no_log: true
 
     - name: Evitar cambios accidentales de las credenciales iniciales
       ansible.builtin.assert:
         that:
           - >-
-            (grafana_saved_credentials.content | b64decode | trim)
-            == grafana_credentials_fingerprint
+            (var_grafana_saved_credentials.content | b64decode | trim)
+            == var_grafana_credentials_fingerprint
         fail_msg: >-
           Han cambiado los datos iniciales del administrador.
           Este instalador no realiza rotaciones de contraseña.
-      when: grafana_state.stat.exists
+      when: var_grafana_state.stat.exists
       no_log: true
 
   tasks:
@@ -146,21 +153,30 @@
         update_cache: true
         cache_valid_time: 3600
 
-    - name: Crear directorios de instalación y configuración
+    - name: Crear el directorio de instalación con acceso para tu grupo
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ var_grafana_install_dir }}"
         state: directory
         owner: root
-        group: root
+        group: "{{ var_grafana_access_group }}"
+        mode: "0750"
+
+    - name: Crear directorios de configuración
+      ansible.builtin.file:
+        path: "{{ var_grafana_config_dir }}"
+        state: directory
+        owner: root
+        group: "{{ var_grafana_access_group }}"
         mode: "0755"
       loop:
-        - "{{ grafana_install_dir }}"
-        - "{{ grafana_install_dir }}/provisioning"
-        - "{{ grafana_install_dir }}/provisioning/datasources"
+        - "{{ var_grafana_install_dir }}/provisioning"
+        - "{{ var_grafana_install_dir }}/provisioning/datasources"
+      loop_control:
+        loop_var: var_grafana_config_dir
 
     - name: Crear directorio privado de secretos
       ansible.builtin.file:
-        path: "{{ grafana_install_dir }}/secrets"
+        path: "{{ var_grafana_install_dir }}/secrets"
         state: directory
         owner: root
         group: root
@@ -168,7 +184,7 @@
 
     - name: Crear directorio persistente de Grafana
       ansible.builtin.file:
-        path: "{{ grafana_install_dir }}/data"
+        path: "{{ var_grafana_install_dir }}/data"
         state: directory
         owner: "472"
         group: "472"
@@ -176,13 +192,13 @@
 
     - name: Crear la red compartida con Prometheus
       community.docker.docker_network:
-        name: "{{ monitorizacion_network }}"
+        name: "{{ var_monitorizacion_network }}"
         state: present
 
     - name: Guardar la contraseña en un archivo protegido
       ansible.builtin.copy:
-        dest: "{{ grafana_install_dir }}/secrets/admin_password"
-        content: "{{ grafana_admin_password }}"
+        dest: "{{ var_grafana_install_dir }}/secrets/admin_password"
+        content: "{{ var_grafana_admin_password }}"
         owner: "472"
         group: "472"
         mode: "0400"
@@ -193,7 +209,7 @@
     - name: Configurar Prometheus como fuente de datos
       ansible.builtin.template:
         src: ../templates/grafana/datasources.yml.j2
-        dest: "{{ grafana_install_dir }}/provisioning/datasources/prometheus.yml"
+        dest: "{{ var_grafana_install_dir }}/provisioning/datasources/prometheus.yml"
         owner: root
         group: root
         mode: "0644"
@@ -203,22 +219,22 @@
     - name: Generar y validar Docker Compose
       ansible.builtin.template:
         src: ../templates/grafana/docker-compose.yml.j2
-        dest: "{{ grafana_install_dir }}/docker-compose.yml"
+        dest: "{{ var_grafana_install_dir }}/docker-compose.yml"
         owner: root
         group: root
         mode: "0644"
         backup: true
         validate: >-
           docker compose
-          --project-name {{ grafana_project_name }}
+          --project-name {{ var_grafana_project_name }}
           -f %s config --quiet
       no_log: true
       diff: false
 
     - name: Registrar las credenciales iniciales antes del arranque
       ansible.builtin.copy:
-        dest: "{{ grafana_state_file }}"
-        content: "{{ grafana_credentials_fingerprint }}\n"
+        dest: "{{ var_grafana_state_file }}"
+        content: "{{ var_grafana_credentials_fingerprint }}\n"
         owner: root
         group: root
         mode: "0600"
@@ -227,12 +243,12 @@
 
     - name: Arrancar Grafana conservando sus datos
       community.docker.docker_compose_v2:
-        project_src: "{{ grafana_install_dir }}"
-        project_name: "{{ grafana_project_name }}"
+        project_src: "{{ var_grafana_install_dir }}"
+        project_name: "{{ var_grafana_project_name }}"
         state: present
         pull: missing
         recreate: auto
-      register: grafana_deployment
+      register: var_grafana_deployment
       no_log: true
 
     - name: Aplicar cambios pendientes
@@ -240,58 +256,62 @@
 
     - name: Esperar a que Grafana y su base de datos respondan
       ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ grafana_port }}/api/health"
+        url: "http://127.0.0.1:{{ var_grafana_port }}/api/health"
         status_code: 200
         return_content: true
-      register: grafana_health
+      register: var_grafana_health
       until:
-        - (grafana_health.status | default(0)) == 200
-        - (grafana_health.json | default({})).get('database', '') == 'ok'
+        - (var_grafana_health.status | default(0)) == 200
+        - (var_grafana_health.json | default({})).get('database', '') == 'ok'
       retries: 30
       delay: 5
 
     - name: Comprobar la conexión de Grafana con Prometheus
       ansible.builtin.uri:
         url: >-
-          http://127.0.0.1:{{ grafana_port }}/api/datasources/uid/prometheus/health
-        url_username: "{{ grafana_admin_user }}"
-        url_password: "{{ grafana_admin_password }}"
+          http://127.0.0.1:{{ var_grafana_port }}/api/datasources/uid/prometheus/health
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ var_grafana_admin_password }}"
         force_basic_auth: true
         status_code: 200
         return_content: true
-      register: grafana_datasource_health
+      register: var_grafana_datasource_health
       until:
-        - (grafana_datasource_health.status | default(0)) == 200
-        - (grafana_datasource_health.json | default({})).get('status', '') == 'OK'
+        - (var_grafana_datasource_health.status | default(0)) == 200
+        - >-
+          (var_grafana_datasource_health.json | default({})).get('status', '')
+          == 'OK'
       retries: 12
       delay: 5
       no_log: true
 
     - name: Mostrar resultado
       ansible.builtin.debug:
-        msg: Grafana está disponible y su conexión con Prometheus funciona.
+        msg:
+          - "Grafana está disponible y su conexión con Prometheus funciona."
+          - "Directorio: {{ var_grafana_install_dir }}"
 
   handlers:
     - name: Recrear Grafana para actualizar el montaje del secreto
       community.docker.docker_compose_v2:
-        project_src: "{{ grafana_install_dir }}"
-        project_name: "{{ grafana_project_name }}"
+        project_src: "{{ var_grafana_install_dir }}"
+        project_name: "{{ var_grafana_project_name }}"
         services:
           - grafana
         state: present
         recreate: always
-      when: not grafana_deployment.changed
-      register: grafana_secret_recreation
+      when: not var_grafana_deployment.changed
+      register: var_grafana_secret_recreation
       no_log: true
 
     - name: Reiniciar Grafana para aplicar la fuente de datos
       community.docker.docker_compose_v2:
-        project_src: "{{ grafana_install_dir }}"
-        project_name: "{{ grafana_project_name }}"
+        project_src: "{{ var_grafana_install_dir }}"
+        project_name: "{{ var_grafana_project_name }}"
         services:
           - grafana
         state: restarted
       when:
-        - not grafana_deployment.changed
-        - not (grafana_secret_recreation.changed | default(false))
+        - not var_grafana_deployment.changed
+        - not (var_grafana_secret_recreation.changed | default(false))
       no_log: true

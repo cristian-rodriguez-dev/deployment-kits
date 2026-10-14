@@ -5,53 +5,56 @@
   gather_facts: false
 
   vars:
-    wazuh_stack_dir: "{{ wazuh_install_dir }}/single-node"
-    wazuh_dashboard_config: >-
-      {{ wazuh_stack_dir }}/config/wazuh_dashboard/opensearch_dashboards.yml
+    var_wazuh_stack_dir: "{{ var_wazuh_install_dir }}/single-node"
+    var_wazuh_dashboard_config: >-
+      {{ var_wazuh_stack_dir }}/config/wazuh_dashboard/opensearch_dashboards.yml
 
   pre_tasks:
     - name: Comprobar las variables necesarias
       ansible.builtin.assert:
         that:
-          - wazuh_install_dir is defined
-          - wazuh_project_name is defined
-          - wazuh_dashboard_port is defined
-          - wazuh_dashboard_timezone is defined
-          - wazuh_dashboard_dark_mode is defined
+          - var_wazuh_install_dir is defined
+          - var_wazuh_project_name is defined
+          - var_wazuh_dashboard_port is defined
+          - var_wazuh_dashboard_timezone is defined
+          - var_wazuh_dashboard_dark_mode is defined
         fail_msg: >-
           Configura las variables necesarias en el grupo
-          wazuh_servers del inventario de AWX.
+          wazuh-servers del inventario de AWX.
 
     - name: Validar las opciones del Dashboard
       ansible.builtin.assert:
         that:
-          - wazuh_dashboard_dark_mode is boolean
-          - wazuh_dashboard_timezone is string
-          - wazuh_dashboard_timezone | length > 0
+          - var_wazuh_dashboard_dark_mode is boolean
+          - var_wazuh_dashboard_timezone is string
+          - var_wazuh_dashboard_timezone | length > 0
         fail_msg: >-
           El modo oscuro debe ser true o false sin comillas.
           Indica una zona horaria como Europe/Madrid.
 
     - name: Comprobar que existen los archivos de instalación
       ansible.builtin.stat:
-        path: "{{ item }}"
+        path: "{{ var_wazuh_file_path }}"
       loop:
-        - "{{ wazuh_dashboard_config }}"
-        - "{{ wazuh_stack_dir }}/docker-compose.yml"
-        - "{{ wazuh_stack_dir }}/compose.credentials.yml"
-      register: wazuh_required_files
+        - "{{ var_wazuh_dashboard_config }}"
+        - "{{ var_wazuh_stack_dir }}/docker-compose.yml"
+        - "{{ var_wazuh_stack_dir }}/compose.credentials.yml"
+      loop_control:
+        loop_var: var_wazuh_file_path
+      register: var_wazuh_required_files
 
     - name: Confirmar que Wazuh está preparado
       ansible.builtin.assert:
         that:
-          - item.stat.exists
-          - item.stat.isreg | default(false)
+          - var_wazuh_file_result.stat.exists
+          - var_wazuh_file_result.stat.isreg | default(false)
         fail_msg: >-
           Falta un archivo necesario.
           Ejecuta primero instalar_wazuh.yml.
-      loop: "{{ wazuh_required_files.results }}"
+      loop: "{{ var_wazuh_required_files.results }}"
       loop_control:
-        label: "{{ item.item }}"
+        loop_var: var_wazuh_file_result
+        label: "{{ var_wazuh_file_result.var_wazuh_file_path }}"
 
     - name: Validar la configuración actual de Compose
       ansible.builtin.command:
@@ -59,35 +62,36 @@
           - docker
           - compose
           - --project-name
-          - "{{ wazuh_project_name }}"
+          - "{{ var_wazuh_project_name }}"
           - -f
           - docker-compose.yml
           - -f
           - compose.credentials.yml
           - config
           - --quiet
-        chdir: "{{ wazuh_stack_dir }}"
+        chdir: "{{ var_wazuh_stack_dir }}"
       changed_when: false
       no_log: true
 
   tasks:
     - name: Configurar tema y zona horaria
       ansible.builtin.lineinfile:
-        path: "{{ wazuh_dashboard_config }}"
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
+        path: "{{ var_wazuh_dashboard_config }}"
+        regexp: "{{ var_wazuh_setting.regexp }}"
+        line: "{{ var_wazuh_setting.line }}"
         state: present
         backup: true
       loop:
         - regexp: '^\s*uiSettings\.overrides\.theme:darkMode:'
           line: >-
-            uiSettings.overrides.theme:darkMode: {{ wazuh_dashboard_dark_mode | ternary('true', 'false') }}
+            uiSettings.overrides.theme:darkMode: {{ var_wazuh_dashboard_dark_mode | ternary('true', 'false') }}
 
         - regexp: '^\s*uiSettings\.overrides\.dateFormat:tz:'
           line: >-
-            uiSettings.overrides.dateFormat:tz: {{ wazuh_dashboard_timezone | to_json }}
+            uiSettings.overrides.dateFormat:tz: {{ var_wazuh_dashboard_timezone | to_json }}
       loop_control:
-        label: "{{ item.line }}"
+        loop_var: var_wazuh_setting
+        label: "{{ var_wazuh_setting.line }}"
       notify: Recrear Wazuh Dashboard
 
     - name: Aplicar los cambios pendientes
@@ -95,14 +99,14 @@
 
     - name: Esperar a que el Dashboard responda
       ansible.builtin.uri:
-        url: "https://127.0.0.1:{{ wazuh_dashboard_port }}/"
+        url: "https://127.0.0.1:{{ var_wazuh_dashboard_port }}/"
         validate_certs: false
         follow_redirects: none
         status_code:
           - 200
           - 302
-      register: wazuh_dashboard_check
-      until: (wazuh_dashboard_check.status | default(0)) in [200, 302]
+      register: var_wazuh_dashboard_check
+      until: (var_wazuh_dashboard_check.status | default(0)) in [200, 302]
       retries: 60
       delay: 10
 
@@ -110,14 +114,14 @@
       ansible.builtin.debug:
         msg:
           - "Configuración de Wazuh Dashboard aplicada."
-          - "Zona horaria: {{ wazuh_dashboard_timezone }}"
-          - "Modo oscuro: {{ wazuh_dashboard_dark_mode }}"
+          - "Zona horaria: {{ var_wazuh_dashboard_timezone }}"
+          - "Modo oscuro: {{ var_wazuh_dashboard_dark_mode }}"
 
   handlers:
     - name: Recrear Wazuh Dashboard
       community.docker.docker_compose_v2:
-        project_src: "{{ wazuh_stack_dir }}"
-        project_name: "{{ wazuh_project_name }}"
+        project_src: "{{ var_wazuh_stack_dir }}"
+        project_name: "{{ var_wazuh_project_name }}"
         files:
           - docker-compose.yml
           - compose.credentials.yml

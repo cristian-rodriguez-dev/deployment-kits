@@ -1,26 +1,26 @@
 ---
 # Copiar y adaptar en las variables del grupo prometheus_servers de AWX.
 
-# prometheus_install_dir: /ruta/absoluta/prometheus_server
-# prometheus_project_name: prometheus
+# var_prometheus_install_dir: /ruta/absoluta/prometheus_server
+# var_prometheus_project_name: prometheus
 
-# monitorizacion_network: monitorizacion
+# var_monitorizacion_network: monitorizacion
 
-# prometheus_image: prom/prometheus:v3.15.0
-# node_exporter_image: prom/node-exporter:v1.12.1
+# var_prometheus_image: prom/prometheus:v3.15.0
+# var_node_exporter_image: prom/node-exporter:v1.12.1
 
-# prometheus_port: 9090
-# node_exporter_port: 9100
+# var_prometheus_port: 9090
+# var_node_exporter_port: 9100
 
-# prometheus_retention: 15d
-# prometheus_scrape_interval: 15s
-# prometheus_local_name: Servidor-Principal
+# var_prometheus_retention: 15d
+# var_prometheus_scrape_interval: 15s
+# var_prometheus_local_name: Servidor-Principal
 
 # Para monitorizar únicamente el servidor local:
-# prometheus_departamentos: []
+# var_prometheus_departamentos: []
 
 # Alternativa con departamentos y equipos remotos:
-# prometheus_departamentos:
+# var_prometheus_departamentos:
 #   - nombre: informatica
 #     equipos:
 #       - nombre: equipo-ejemplo

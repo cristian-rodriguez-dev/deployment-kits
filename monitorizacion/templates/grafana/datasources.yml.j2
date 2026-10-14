@@ -5,7 +5,7 @@ datasources:
     uid: prometheus
     type: prometheus
     access: proxy
-    url: {{ grafana_prometheus_url | to_json }}
+    url: {{ var_grafana_prometheus_url | to_json }}
     isDefault: true
     editable: false
     jsonData:
