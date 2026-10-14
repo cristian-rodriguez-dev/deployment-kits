@@ -32,7 +32,7 @@ Esta guía explica la configuración dentro de un AWX ya instalado:
 Los playbooks utilizados son:
 
 | Playbook | Función |
-|---|---|
+| --- | --- |
 | `instalar_wazuh.yml` | Instalar Wazuh, preparar certificados y configurar credenciales iniciales. |
 | `configurar_wazuh.yml` | Configurar el tema y la zona horaria del Dashboard. |
 | `instalar_prometheus.yml` | Instalar Prometheus y Node Exporter local. |
@@ -54,7 +54,6 @@ No se incluye:
 El servidor debe disponer de:
 
 - Ubuntu.
-- Python 3.
 - Servicio SSH operativo.
 - Usuario SSH con permisos para utilizar sudo.
 - Docker instalado.
@@ -89,7 +88,7 @@ Esta ruta es relativa a la raíz del repositorio Git. Crear el archivo no sustit
 ### Valores utilizados en los ejemplos
 
 | Elemento | Valor |
-|---|---|
+| --- | --- |
 | Servidor Ubuntu | `10.10.3.100` |
 | Host en AWX | `ansible_server` |
 | Usuario SSH | `pruebas` |
@@ -142,14 +141,14 @@ En AWX:
 1. Entrar en **Recursos → Proyectos → Añadir**.
 2. Configurar los campos:
 
-| Campo | Valor |
-|---|---|
-| Nombre | `Nombre_Proyecto` |
-| Organización | `Nombre_Organización` |
-| Tipo de control de código fuente | `Git` |
-| URL del repositorio | URL de `Nombre_Repositorio` |
-| Rama | `Rama_Git_Usada` |
-| Credencial de control de código fuente | Credencial de Git, solo si el repositorio es privado |
+    | Campo | Valor |
+    | --- | --- |
+    | Nombre | `Nombre_Proyecto` |
+    | Organización | `Nombre_Organización` |
+    | Tipo de control de código fuente | `Git` |
+    | URL del repositorio | URL de `Nombre_Repositorio` |
+    | Rama | `Rama_Git_Usada` |
+    | Credencial de control de código fuente | Credencial de Git, solo si el repositorio es privado |
 
 3. Guardar.
 4. Sincronizar el proyecto.
@@ -242,7 +241,7 @@ hosts: grafana-servers
 
 Introducir los bloques en:
 
-**Inventario → Grupos → grupo correspondiente → Editar → Variables**
+**Inventario → Grupos → grupo correspondiente → Editar → Variables**:
 
 Las variables propias de los playbooks utilizan el prefijo `var_`.
 
@@ -254,22 +253,12 @@ Las variables reservadas de Ansible, como `ansible_host` y `ansible_become`, con
 
 ```yaml
 ---
-# Ruta de instalación.
 var_wazuh_install_dir: /home/pruebas/instalacion/wazuh-docker
-
-# Grupo de Linux con acceso al directorio principal de instalación.
 var_wazuh_access_group: pruebas
-
-# Conservar el valor actual si ya existe una instalación.
 var_wazuh_project_name: wazuh
-
 var_wazuh_version: "4.14.8"
-
-# Puerto externo del Dashboard.
-# Dentro del contenedor se utiliza 5601.
 var_wazuh_dashboard_port: 5601
 
-# Apariencia.
 var_wazuh_dashboard_timezone: Europe/Madrid
 var_wazuh_dashboard_dark_mode: true
 ```
@@ -294,7 +283,6 @@ var_prometheus_retention: 15d
 # Cantidad de segundos entre consultas.
 var_prometheus_scrape_interval: 15s
 
-# Etiqueta del servidor local.
 var_prometheus_local_name: Servidor-Principal
 
 # Red compartida con Grafana.
@@ -327,21 +315,16 @@ var_prometheus_departamentos: []
 var_grafana_install_dir: /home/pruebas/instalacion/grafana
 var_grafana_access_group: pruebas
 var_grafana_project_name: grafana
-
 var_grafana_image: grafana/grafana:13.2.3
 var_grafana_port: 3000
-
 var_grafana_admin_user: admin
 var_grafana_admin_email: admin@localhost
 
 # Debe coincidir con la red utilizada por Prometheus.
 var_monitorizacion_network: monitorizacion
 
-# URL interna entre contenedores.
 var_grafana_prometheus_url: http://prometheus:9090
 ```
-
-Las versiones mostradas son las utilizadas en esta configuración. Conservar las versiones aprobadas para cada despliegue; no cambiarlas como parte de una simple repetición del instalador.
 
 ### 6.4. Variables compartidas
 
@@ -353,7 +336,7 @@ var_monitorizacion_network: monitorizacion
 
 Debe coincidir en Prometheus y Grafana.
 
-También puede definirse una sola vez en las variables del inventario o en las variables del WorkFlow que une los trabajos, eliminando las copias de los grupos.
+*(Las variables también pueden definirse una sola vez en las variables del inventario o en las variables del WorkFlow que une los trabajos, eliminando las copias de los grupos)*.
 
 ### 6.5. Acceso a los directorios
 
@@ -384,6 +367,7 @@ owner: root
 group: "{{ var_grafana_access_group }}"
 mode: "0750"
 ```
+
 ***(Si quieres que tengan unas poderes específicos cámbialos en mode: " ")***
 
 Cada playbook utiliza su variable de grupo correspondiente.
@@ -399,7 +383,7 @@ Los directorios superiores también deben permitir el acceso al usuario.
 Entrar en **Recursos → Credenciales → Añadir**.
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Nombre | `SSH - Nombre_Inventario` |
 | Organización | `Nombre_Organización` |
 | Tipo de credencial | Máquina |
@@ -416,7 +400,7 @@ Para ejecutar el workflow sin intervención, guardar las credenciales necesarias
 
 Entrar en:
 
-**Administración → Tipos de credenciales → Añadir**
+**Administración → Tipos de credenciales → Añadir**:
 
 Nombre:
 
@@ -466,7 +450,7 @@ Guardar el tipo de credencial.
 Después, entrar en **Recursos → Credenciales → Añadir**:
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Nombre | `Wazuh - Nombre_Inventario` |
 | Organización | `Nombre_Organización` |
 | Tipo de credencial | `Credenciales Wazuh` |
@@ -482,7 +466,7 @@ Requisitos de las contraseñas del playbook:
 
 Entrar en:
 
-**Administración → Tipos de credenciales → Añadir**
+**Administración → Tipos de credenciales → Añadir**:
 
 Nombre:
 
@@ -520,7 +504,7 @@ var_grafana_admin_password: >-
 Después, crear la credencial:
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Nombre | `Grafana - Nombre_Inventario` |
 | Organización | `Nombre_Organización` |
 | Tipo de credencial | `Credenciales Grafana` |
@@ -533,7 +517,7 @@ El playbook exige al menos 8 caracteres, sin saltos de línea ni espacios al pri
 Los campos de entrada, las variables de entorno y las variables del playbook tienen funciones diferentes:
 
 | Elemento | Ejemplo |
-|---|---|
+| --- | --- |
 | Campo de la credencial | `admin_password` |
 | Variable de entorno inyectada | `VAR_GRAFANA_ADMIN_PASSWORD` |
 | Variable del playbook | `var_grafana_admin_password` |
@@ -544,12 +528,12 @@ El nombre del inyector debe coincidir exactamente con el utilizado en el `lookup
 
 Entrar en:
 
-**Recursos → Plantillas → Añadir → Plantilla de trabajo**
+**Recursos → Plantillas → Añadir → Plantilla de trabajo**:
 
 Configuración común:
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Tipo de trabajo | Ejecutar |
 | Inventario | `Nombre_Inventario` |
 | Proyecto | `Nombre_Proyecto` |
@@ -559,7 +543,7 @@ Configuración común:
 Crear las siguientes plantillas:
 
 | Nombre | Playbook | Credenciales |
-|---|---|---|
+| --- | --- | --- |
 | `01 - Instalar Wazuh` | `monitorizacion/playbooks/instalar_wazuh.yml` | Máquina + Wazuh |
 | `02 - Configurar Wazuh` | `monitorizacion/playbooks/configurar_wazuh.yml` | Máquina |
 | `03 - Instalar Prometheus` | `monitorizacion/playbooks/instalar_prometheus.yml` | Máquina |
@@ -582,7 +566,7 @@ Si no aparece el playbook en el desplegable:
 
 Entrar en:
 
-**Recursos → Plantillas → Añadir → Plantilla de flujo de trabajo**
+**Recursos → Plantillas → Añadir → Plantilla de flujo de trabajo**:
 
 Nombre:
 
@@ -691,11 +675,11 @@ El instalador comprueba la salud de Grafana y su conexión con Prometheus.
 
 La importación de dashboards se realiza por separado. El dashboard utilizado durante las pruebas para Node Exporter fue `Node Exporter Full`, ID `1860`.
 
-En caso de querer importar este dashboard: 
+En caso de querer importar este dashboard:
 
-**Dashboards -> New -> Import Dashboard**
+**Dashboards -> New -> Import Dashboard**:
 
-Introducir `1860` en el campo de `Find and import` y pulsar `Load`. 
+Introducir `1860` en el campo de `Find and import` y pulsar `Load`.
 
 Tras esto, en la parte inferior pulsar el botón de `Import` y ya estaría importado el dashboard.
 
