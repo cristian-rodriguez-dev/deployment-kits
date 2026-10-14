@@ -280,7 +280,7 @@
         - >-
           (var_grafana_datasource_health.json | default({})).get('status', '')
           == 'OK'
-      retries: 12
+      retries: 30
       delay: 5
       no_log: true
 
