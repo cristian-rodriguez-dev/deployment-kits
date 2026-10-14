@@ -8,12 +8,11 @@
     var_wazuh_stack_dir: "{{ var_wazuh_install_dir }}/single-node"
     var_wazuh_state_file: "{{ var_wazuh_install_dir }}/.awx-initialized"
 
-    # Mantener estos nombres de entorno en la credencial de AWX.
     var_wazuh_admin_password: >-
-      {{ lookup('ansible.builtin.env', 'WAZUH_ADMIN_PASSWORD') }}
+      {{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}
 
     var_wazuh_api_password: >-
-      {{ lookup('ansible.builtin.env', 'WAZUH_API_PASSWORD') }}
+      {{ lookup('ansible.builtin.env', 'VAR_WAZUH_API_PASSWORD') }}
 
     var_wazuh_credentials_fingerprint: >-
       {{

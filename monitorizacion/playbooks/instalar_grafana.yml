@@ -5,9 +5,8 @@
   gather_facts: true
 
   vars:
-    # El valor real lo inyecta la credencial de AWX.
     var_grafana_admin_password: >-
-      {{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASSWORD') }}
+      {{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}
 
     var_grafana_state_file: "{{ var_grafana_install_dir }}/.awx-initialized"
 
