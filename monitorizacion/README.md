@@ -1,0 +1,881 @@
+# Despliegue de monitorización con AWX
+
+Guía para instalar Wazuh, Prometheus, Node Exporter y Grafana en Ubuntu mediante cuatro playbooks de Ansible.
+
+Las variables se configuran en el inventario de AWX y las contraseñas se guardan en sus credenciales.
+
+## Índice
+
+1. [Alcance](#1-alcance)
+2. [Requisitos previos](#2-requisitos-previos)
+3. [Estructura del repositorio](#3-estructura-del-repositorio)
+4. [Crear el proyecto](#4-crear-el-proyecto)
+5. [Crear el inventario](#5-crear-el-inventario)
+6. [Configurar las variables](#6-configurar-las-variables)
+7. [Configurar las credenciales](#7-configurar-las-credenciales)
+8. [Crear las plantillas de trabajo](#8-crear-las-plantillas-de-trabajo)
+9. [Crear el workflow](#9-crear-el-workflow)
+10. [Ejecutar y comprobar](#10-ejecutar-y-comprobar)
+11. [Añadir equipos a Prometheus](#11-añadir-equipos-a-prometheus)
+12. [Utilizar otro equipo o servidor](#12-utilizar-otro-equipo-o-servidor)
+13. [Modificar o repetir el despliegue](#13-modificar-o-repetir-el-despliegue)
+14. [Problemas habituales](#14-problemas-habituales)
+
+## 1. Alcance
+
+Esta guía explica la configuración dentro de un AWX ya instalado:
+
+- Proyecto conectado a Git.
+- Inventario, host y grupos.
+- Variables de los servicios.
+- Credenciales SSH y de las aplicaciones.
+- Cuatro plantillas de trabajo.
+- Un workflow para ejecutarlas en orden.
+
+Los playbooks utilizados son:
+
+| Playbook | Función |
+|---|---|
+| `instalar_wazuh.yml` | Instalar Wazuh, preparar certificados y configurar credenciales iniciales. |
+| `configurar_wazuh.yml` | Configurar el tema y la zona horaria del Dashboard. |
+| `instalar_prometheus.yml` | Instalar Prometheus y Node Exporter local. |
+| `instalar_grafana.yml` | Instalar Grafana y configurar Prometheus como fuente de datos. |
+
+No se incluye:
+
+- La instalación de AWX desde cero.
+- La construcción completa de su entorno de ejecución.
+- La instalación de Docker.
+- La instalación de agentes en equipos remotos.
+- La importación automática de dashboards en Grafana.
+- La integración de Wazuh como fuente de datos de Grafana.
+
+## 2. Requisitos previos
+
+### Servidor de destino
+
+El servidor debe disponer de:
+
+- Ubuntu.
+- Python 3.
+- Servicio SSH operativo.
+- Usuario SSH con permisos para utilizar sudo.
+- Docker instalado.
+- Docker Compose 2.18.0 o posterior.
+- Acceso a los repositorios y registros de imágenes necesarios.
+- Recursos suficientes para ejecutar los servicios.
+
+El entorno de ejecución de AWX debe poder conectarse por SSH al servidor.
+
+### Entorno de ejecución de AWX
+
+Los playbooks necesitan las siguientes colecciones para su correcto funcionamiento:
+
+```yaml
+---
+collections:
+  - name: community.docker
+    version: "5.3.0"
+
+  - name: ansible.posix
+    version: "2.1.0"
+```
+
+Si se utiliza la instalación de dependencias durante la sincronización del proyecto, colocar el archivo en:
+
+```text
+monitorizacion/collections/requirements.yml
+```
+
+Esta ruta es relativa a la raíz del repositorio Git. Crear el archivo no sustituye la comprobación de que AWX instala y encuentra las colecciones.
+
+### Valores utilizados en los ejemplos
+
+| Elemento | Valor |
+|---|---|
+| Servidor Ubuntu | `10.10.3.100` |
+| Host en AWX | `ansible_server` |
+| Usuario SSH | `pruebas` |
+| Directorio base | `/home/pruebas/instalacion` |
+| Wazuh Dashboard | `5601` |
+| Prometheus | `9090` |
+| Node Exporter | `9100` |
+| Grafana | `3000` |
+
+***(Adaptar estos valores al entorno de instalación)***.
+
+Si ya existe una instalación, conservar sus rutas, proyectos Docker, versiones y credenciales.
+
+## 3. Estructura del repositorio
+
+Esta sería la estructura que debe de tener el repositorio para usar los playbooks correctamente.
+
+```text
+raiz_de_tu_repositorio/
+├── collections/
+│   └── requirements.yml
+└── monitorizacion/
+    ├── README.md
+    ├── playbooks/
+    │   ├── instalar_wazuh.yml
+    │   ├── configurar_wazuh.yml
+    │   ├── instalar_prometheus.yml
+    │   └── instalar_grafana.yml
+    └── templates/
+        ├── wazuh/
+        │   └── compose.credentials.yml.j2
+        ├── prometheus/
+        │   ├── docker-compose.yml.j2
+        │   └── prometheus.yml.j2
+        └── grafana/
+            ├── docker-compose.yml.j2
+            └── datasources.yml.j2
+```
+
+Todos los archivos deben tener contenido y estar guardados en la rama que utiliza AWX.
+
+Las plantillas `.j2` se utilizan desde los playbooks. No se seleccionan como playbooks en la interfaz de AWX.
+
+No guardar contraseñas reales, claves privadas ni archivos generados con secretos en el repositorio.
+
+## 4. Crear el proyecto
+
+En AWX:
+
+1. Entrar en **Recursos → Proyectos → Añadir**.
+2. Configurar los campos:
+
+| Campo | Valor |
+|---|---|
+| Nombre | `Nombre_Proyecto` |
+| Organización | `Nombre_Organización` |
+| Tipo de control de código fuente | `Git` |
+| URL del repositorio | URL de `Nombre_Repositorio` |
+| Rama | `Rama_Git_Usada` |
+| Credencial de control de código fuente | Credencial de Git, solo si el repositorio es privado |
+
+3. Guardar.
+4. Sincronizar el proyecto.
+5. Esperar a que la sincronización termine correctamente.
+
+## 5. Crear el inventario
+
+### 5.1. Inventario
+
+En **Recursos → Inventarios → Añadir**, crear:
+
+```text
+Nombre: Nombre_Inventario
+Organización: Nombre_Organización
+```
+
+### 5.2. Host
+
+Dentro del inventario, entrar en **Hosts → Añadir**.
+
+Nombre:
+
+```text
+ansible_server
+```
+
+Variables:
+
+```yaml
+---
+ansible_host: 10.10.3.100
+
+ansible_become: true
+ansible_become_method: sudo
+ansible_become_user: root
+```
+
+Estas variables indican la IP del servidor y la elevación de privilegios mediante sudo.
+
+El usuario SSH se define en la credencial de Máquina.
+
+### Compatibilidad con sudo-rs
+
+En el servidor utilizado durante las pruebas fue necesario añadir:
+
+```yaml
+ansible_become_exe: /usr/bin/sudo.ws
+```
+
+Se utilizó porque la versión de Ansible del entorno de AWX no reconocía correctamente la petición de contraseña de `sudo-rs`.
+*(No se probó con `sudo su`)*
+
+Antes de utilizarla en otro servidor, comprobar:
+
+```bash
+command -v sudo.ws
+```
+
+No añadir esta variable si el ejecutable no existe. No todos los servidores Ubuntu necesitan este ajuste.
+
+### 5.3. Grupos
+
+Dentro del inventario, crear estos grupos:
+
+```text
+wazuh-servers
+prometheus-servers
+grafana-servers
+```
+
+Asociar el host existente `ansible_server` a los tres grupos.
+
+No crear tres copias del mismo host.
+
+Los nombres deben coincidir exactamente con los nombres en los playbooks:
+
+```yaml
+hosts: wazuh-servers
+```
+
+```yaml
+hosts: prometheus-servers
+```
+
+```yaml
+hosts: grafana-servers
+```
+
+## 6. Configurar las variables
+
+Introducir los bloques en:
+
+**Inventario → Grupos → grupo correspondiente → Editar → Variables**
+
+Las variables propias de los playbooks utilizan el prefijo `var_`.
+
+Las variables reservadas de Ansible, como `ansible_host` y `ansible_become`, conservan sus nombres.
+
+***(Ante cualquier duda de como nombrar una variable, revisar el playbook al que pertenece el grupo que se esté modificando)***
+
+### 6.1. Grupo wazuh-servers
+
+```yaml
+---
+# Ruta de instalación.
+var_wazuh_install_dir: /home/pruebas/instalacion/wazuh-docker
+
+# Grupo de Linux con acceso al directorio principal de instalación.
+var_wazuh_access_group: pruebas
+
+# Conservar el valor actual si ya existe una instalación.
+var_wazuh_project_name: wazuh
+
+var_wazuh_version: "4.14.8"
+
+# Puerto externo del Dashboard.
+# Dentro del contenedor se utiliza 5601.
+var_wazuh_dashboard_port: 5601
+
+# Apariencia.
+var_wazuh_dashboard_timezone: Europe/Madrid
+var_wazuh_dashboard_dark_mode: true
+```
+
+### 6.2. Grupo prometheus-servers
+
+```yaml
+---
+var_prometheus_install_dir: /home/pruebas/instalacion/prometheus_server
+var_prometheus_access_group: pruebas
+var_prometheus_project_name: prometheus
+
+var_prometheus_image: prom/prometheus:v3.15.0
+var_node_exporter_image: prom/node-exporter:v1.12.1
+
+var_prometheus_port: 9090
+var_node_exporter_port: 9100
+
+# Cantidad de días durante los que se conservan las métricas.
+var_prometheus_retention: 15d
+
+# Cantidad de segundos entre consultas.
+var_prometheus_scrape_interval: 15s
+
+# Etiqueta del servidor local.
+var_prometheus_local_name: Servidor-Principal
+
+# Red compartida con Grafana.
+var_monitorizacion_network: monitorizacion
+
+# Lista de equipos remotos.
+# El servidor local ya se añade desde la plantilla.
+var_prometheus_departamentos: []
+
+# Ejemplo: sustituir la lista vacía anterior por este bloque.
+#
+# var_prometheus_departamentos:
+#   - nombre: Informatica
+#     equipos:
+#       - nombre: Equipo-01
+#         direccion: 10.10.3.101
+#         puerto: 9100
+#
+#   - nombre: Administracion
+#     equipos:
+#       - nombre: Equipo-02
+#         direccion: 10.10.3.102
+#         puerto: 9100
+```
+
+### 6.3. Grupo grafana-servers
+
+```yaml
+---
+var_grafana_install_dir: /home/pruebas/instalacion/grafana
+var_grafana_access_group: pruebas
+var_grafana_project_name: grafana
+
+var_grafana_image: grafana/grafana:13.2.3
+var_grafana_port: 3000
+
+var_grafana_admin_user: admin
+var_grafana_admin_email: admin@localhost
+
+# Debe coincidir con la red utilizada por Prometheus.
+var_monitorizacion_network: monitorizacion
+
+# URL interna entre contenedores.
+var_grafana_prometheus_url: http://prometheus:9090
+```
+
+Las versiones mostradas son las utilizadas en esta configuración. Conservar las versiones aprobadas para cada despliegue; no cambiarlas como parte de una simple repetición del instalador.
+
+### 6.4. Variables compartidas
+
+El mismo host pertenece a varios grupos y recibe sus variables.
+
+```yaml
+var_monitorizacion_network: monitorizacion
+```
+
+Debe coincidir en Prometheus y Grafana.
+
+También puede definirse una sola vez en las variables del inventario o en las variables del WorkFlow que une los trabajos, eliminando las copias de los grupos.
+
+### 6.5. Acceso a los directorios
+
+Las variables `var_*_access_group` indican un grupo de Linux del servidor, no un grupo de AWX.
+
+Consultar el grupo principal del usuario:
+
+```bash
+id -gn
+```
+
+Consultar todos sus grupos:
+
+```bash
+id -nG
+```
+
+Consultar un usuario concreto:
+
+```bash
+id pruebas
+```
+
+Los directorios principales se crean con:
+
+```yaml
+owner: root
+group: "{{ var_grafana_access_group }}"
+mode: "0750"
+```
+***(Si quieres que tengan unas poderes específicos cámbialos en mode: " ")***
+
+Cada playbook utiliza su variable de grupo correspondiente.
+
+Los miembros del grupo pueden entrar y listar el directorio. Los archivos de credenciales y los directorios de datos mantienen permisos específicos.
+
+Los directorios superiores también deben permitir el acceso al usuario.
+
+## 7. Configurar las credenciales
+
+### 7.1. Credencial de Máquina
+
+Entrar en **Recursos → Credenciales → Añadir**.
+
+| Campo | Valor |
+|---|---|
+| Nombre | `SSH - Nombre_Inventario` |
+| Organización | `Nombre_Organización` |
+| Tipo de credencial | Máquina |
+| Usuario | Usuario SSH del servidor |
+| Contraseña | Contraseña SSH, si se utiliza |
+| Clave privada SSH | Si se utiliza autenticación mediante clave |
+| Método de escalado de privilegios | `sudo` |
+| Usuario de escalado | `root` |
+| Contraseña de escalado | La contraseña que requiere sudo para ese usuario |
+
+Para ejecutar el workflow sin intervención, guardar las credenciales necesarias en AWX y no dejarlas pendientes de solicitud al lanzar el trabajo.
+
+### 7.2. Tipo de credencial de Wazuh
+
+Entrar en:
+
+**Administración → Tipos de credenciales → Añadir**
+
+Nombre:
+
+```text
+Credenciales Wazuh
+```
+
+Configuración de entrada:
+
+```yaml
+fields:
+  - id: admin_password
+    type: string
+    label: Contraseña del administrador del Indexer
+    secret: true
+
+  - id: api_password
+    type: string
+    label: Contraseña de la API de Wazuh
+    secret: true
+
+required:
+  - admin_password
+  - api_password
+```
+
+Configuración del inyector:
+
+```yaml
+env:
+  VAR_WAZUH_ADMIN_PASSWORD: "{{ admin_password }}"
+  VAR_WAZUH_API_PASSWORD: "{{ api_password }}"
+```
+
+El playbook `instalar_wazuh.yml` debe leer esos mismos nombres:
+
+```yaml
+var_wazuh_admin_password: >-
+  {{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}
+
+var_wazuh_api_password: >-
+  {{ lookup('ansible.builtin.env', 'VAR_WAZUH_API_PASSWORD') }}
+```
+
+Guardar el tipo de credencial.
+
+Después, entrar en **Recursos → Credenciales → Añadir**:
+
+| Campo | Valor |
+|---|---|
+| Nombre | `Wazuh - Servidor monitorización` |
+| Organización | Organización de la empresa |
+| Tipo de credencial | `Credenciales Wazuh` |
+| Contraseña del administrador | Contraseña real |
+| Contraseña de la API | Contraseña real |
+
+Requisitos del playbook:
+
+- Administrador: al menos 8 caracteres.
+- API: entre 8 y 64 caracteres, con mayúscula, minúscula, número y símbolo.
+
+### 7.3. Tipo de credencial de Grafana
+
+Entrar en:
+
+**Administración → Tipos de credenciales → Añadir**
+
+Nombre:
+
+```text
+Credenciales Grafana
+```
+
+Configuración de entrada:
+
+```yaml
+fields:
+  - id: admin_password
+    type: string
+    label: Contraseña del administrador de Grafana
+    secret: true
+
+required:
+  - admin_password
+```
+
+Configuración del inyector:
+
+```yaml
+env:
+  VAR_GRAFANA_ADMIN_PASSWORD: "{{ admin_password }}"
+```
+
+El playbook `instalar_grafana.yml` debe leer:
+
+```yaml
+var_grafana_admin_password: >-
+  {{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}
+```
+
+Después, crear la credencial:
+
+| Campo | Valor |
+|---|---|
+| Nombre | `Grafana - Servidor monitorización` |
+| Organización | Organización de la empresa |
+| Tipo de credencial | `Credenciales Grafana` |
+| Contraseña del administrador | Contraseña real |
+
+El playbook exige al menos 8 caracteres, sin saltos de línea ni espacios al principio o al final.
+
+### 7.4. Correspondencia de nombres
+
+Los campos de entrada, las variables de entorno y las variables del playbook tienen funciones diferentes:
+
+| Elemento | Ejemplo |
+|---|---|
+| Campo de la credencial | `admin_password` |
+| Variable de entorno inyectada | `VAR_GRAFANA_ADMIN_PASSWORD` |
+| Variable del playbook | `var_grafana_admin_password` |
+
+El nombre del inyector debe coincidir exactamente con el utilizado en el `lookup`.
+
+No es necesario renombrar los campos de entrada de un tipo de credencial existente.
+
+Si los playbooks todavía leen `GRAFANA_ADMIN_PASSWORD` o `WAZUH_ADMIN_PASSWORD` sin `VAR_`, actualizar sus `lookup` antes de utilizar los inyectores de esta guía.
+
+## 8. Crear las plantillas de trabajo
+
+Entrar en:
+
+**Recursos → Plantillas → Añadir → Plantilla de trabajo**
+
+Configuración común:
+
+| Campo | Valor |
+|---|---|
+| Tipo de trabajo | Ejecutar |
+| Inventario | `Monitorización` |
+| Proyecto | `Monitorización - Deployment Kits` |
+| Entorno de ejecución | Entorno con las dependencias necesarias |
+| Verbosidad | `0 (Normal)` |
+| Límite | Vacío |
+| Elevación de privilegios | Activada |
+
+Crear las siguientes plantillas:
+
+| Nombre | Playbook | Credenciales |
+|---|---|---|
+| `01 - Instalar Wazuh` | `monitorizacion/playbooks/instalar_wazuh.yml` | Máquina + Wazuh |
+| `02 - Configurar Wazuh` | `monitorizacion/playbooks/configurar_wazuh.yml` | Máquina |
+| `03 - Instalar Prometheus` | `monitorizacion/playbooks/instalar_prometheus.yml` | Máquina |
+| `04 - Instalar Grafana` | `monitorizacion/playbooks/instalar_grafana.yml` | Máquina + Grafana |
+
+Puede seleccionarse una credencial de Máquina y credenciales personalizadas de tipos diferentes en la misma plantilla.
+
+No duplicar las variables de los grupos en las Variables adicionales de la plantilla salvo que se quiera sobrescribirlas.
+
+Si no aparece el playbook en el desplegable:
+
+1. Comprobar que está guardado en Git.
+2. Revisar la rama del proyecto.
+3. Sincronizar el proyecto.
+4. Comprobar la ruta relativa del archivo.
+
+## 9. Crear el workflow
+
+Entrar en:
+
+**Recursos → Plantillas → Añadir → Plantilla de flujo de trabajo**
+
+Nombre:
+
+```text
+Desplegar monitorización
+```
+
+Abrir el visualizador y añadir los nodos en este orden:
+
+1. `01 - Instalar Wazuh`.
+2. `02 - Configurar Wazuh`.
+3. `03 - Instalar Prometheus`.
+4. `04 - Instalar Grafana`.
+
+Conectar cada nodo con el siguiente mediante:
+
+```text
+En caso de éxito / On Success
+```
+
+Si se utiliza el playbook de Docker de la empresa, situarlo antes de `01 - Instalar Wazuh`.
+
+Guardar el visualizador y el workflow.
+
+Prometheus debe ejecutarse antes de Grafana, porque el instalador de Grafana comprueba la conexión con su fuente de datos.
+
+Las credenciales se configuran en las plantillas de trabajo de cada nodo.
+
+## 10. Ejecutar y comprobar
+
+### 10.1. Antes de ejecutar
+
+1. Sincronizar el proyecto Git.
+2. Comprobar que los archivos `.yml` y `.j2` tienen contenido.
+3. Comprobar que el servidor pertenece a los tres grupos.
+4. Revisar variables y credenciales.
+5. Confirmar que los puertos externos elegidos están disponibles.
+6. Lanzar el workflow.
+
+### 10.2. Wazuh
+
+Acceso:
+
+```text
+https://10.10.3.100:8443
+```
+
+Usuario:
+
+```text
+admin
+```
+
+Contraseña: la guardada en la credencial de Wazuh para el administrador.
+
+El mapeo previsto es:
+
+```yaml
+ports:
+  - "8443:5601"
+```
+
+El primer puerto corresponde al servidor; el segundo, al interior del contenedor.
+
+Comprobar también que se han aplicado el tema y la zona horaria.
+
+### 10.3. Prometheus
+
+Interfaz:
+
+```text
+http://10.10.3.100:9090
+```
+
+Estado de los targets:
+
+```text
+http://10.10.3.100:9090/targets
+```
+
+Los targets esperados deben aparecer como:
+
+```text
+UP
+```
+
+### 10.4. Grafana
+
+Interfaz:
+
+```text
+http://10.10.3.100:3000
+```
+
+Usuario: el valor de `var_grafana_admin_user`.
+
+Contraseña: la guardada en la credencial de Grafana.
+
+La fuente de datos Prometheus se configura automáticamente con:
+
+```yaml
+name: Prometheus
+uid: prometheus
+url: http://prometheus:9090
+```
+
+El instalador comprueba la salud de Grafana y su conexión con Prometheus.
+
+La importación de dashboards se realiza por separado. El dashboard utilizado durante las pruebas para Node Exporter fue `Node Exporter Full`, ID `1860`.
+
+## 11. Añadir equipos a Prometheus
+
+Node Exporter debe estar instalado en cada equipo Ubuntu y ser accesible desde Prometheus.
+
+En las variables del grupo `prometheus-servers`, configurar:
+
+```yaml
+var_prometheus_departamentos:
+  - nombre: Informatica
+    equipos:
+      - nombre: Equipo-01
+        direccion: 10.10.3.101
+        puerto: 9100
+
+      - nombre: Equipo-02
+        direccion: 10.10.3.102
+        puerto: 9100
+
+  - nombre: Administracion
+    equipos:
+      - nombre: Equipo-03
+        direccion: 10.10.3.103
+        puerto: 9100
+```
+
+Después:
+
+1. Guardar las variables.
+2. Ejecutar `03 - Instalar Prometheus`.
+3. Revisar `/targets`.
+
+El departamento se utiliza como `job_name` y el nombre del equipo como etiqueta `nodename`.
+
+La lista debe contener todos los equipos remotos que se desean monitorizar. La configuración se genera completa en cada ejecución.
+
+Añadir un target no instala Node Exporter en el remoto.
+
+## 12. Utilizar otro equipo o servidor
+
+### 12.1. Acceder al mismo AWX desde otro ordenador
+
+No es necesario configurar AWX de nuevo.
+
+1. Abrir la URL del AWX existente.
+2. Iniciar sesión con una cuenta autorizada.
+3. Utilizar los proyectos, inventarios, credenciales y plantillas existentes.
+
+La configuración está almacenada en AWX, no en el navegador del ordenador.
+
+### 12.2. Desplegar en otro servidor utilizando el mismo AWX
+
+Para conservar la instalación actual y crear otra independiente:
+
+1. Preparar el nuevo servidor Ubuntu con los requisitos previos.
+2. Crear otro inventario, por ejemplo:
+
+   ```text
+   Monitorización - Servidor 02
+   ```
+
+3. Crear el host con la nueva IP:
+
+   ```yaml
+   ---
+   ansible_host: 10.10.3.110
+   ansible_become: true
+   ansible_become_method: sudo
+   ansible_become_user: root
+   ```
+
+4. Crear los mismos grupos dentro de ese inventario:
+
+   ```text
+   wazuh-servers
+   prometheus-servers
+   grafana-servers
+   ```
+
+5. Asociar el nuevo host a los tres grupos.
+6. Introducir las variables adaptadas a ese servidor.
+7. Crear o seleccionar su credencial de Máquina.
+8. Crear credenciales de Wazuh y Grafana para ese despliegue.
+9. Copiar o crear las cuatro plantillas, seleccionando el nuevo inventario y sus credenciales.
+10. Crear un workflow con esas nuevas plantillas.
+
+Se reutilizan el proyecto Git y los playbooks.
+
+No cambiar la IP del inventario original si se quiere seguir gestionando también el servidor anterior.
+
+No copiar automáticamente:
+
+```yaml
+ansible_become_exe: /usr/bin/sudo.ws
+```
+
+Comprobar primero si ese ajuste es necesario y si el ejecutable existe.
+
+### 12.3. Utilizar una instalación nueva de AWX
+
+En un AWX diferente será necesario preparar:
+
+1. Organización y permisos.
+2. Entorno de ejecución y dependencias.
+3. Credencial de acceso a Git, si corresponde.
+4. Proyecto.
+5. Inventario, host y grupos.
+6. Variables.
+7. Tipos de credenciales personalizados.
+8. Credenciales con sus valores reales.
+9. Plantillas de trabajo.
+10. Workflow.
+
+El repositorio contiene los playbooks y las plantillas, pero no recrea automáticamente todos estos objetos de AWX.
+
+La instalación inicial de AWX se realiza mediante un procedimiento separado.
+
+## 13. Modificar o repetir el despliegue
+
+| Cambio | Acción |
+|---|---|
+| Modificar un playbook o plantilla en Git | Guardar el commit, sincronizar el proyecto y ejecutar la plantilla. |
+| Cambiar el tema o la zona horaria | Modificar variables y ejecutar `Configurar Wazuh`. |
+| Añadir targets a Prometheus | Modificar la lista y ejecutar `Instalar Prometheus`. |
+| Cambiar un puerto externo | Modificar la variable y ejecutar el instalador correspondiente. |
+| Repetir una ejecución fallida | Corregir la causa y ejecutar de nuevo conservando los datos. |
+| Cambiar contraseñas existentes | Utilizar un procedimiento específico de rotación. |
+| Actualizar versiones | Revisar previamente el procedimiento de actualización. |
+
+Los playbooks no requieren borrar contenedores, directorios o volúmenes para repetir una ejecución.
+
+Conservar las rutas y nombres de proyecto evita crear instalaciones distintas por accidente.
+
+Wazuh y Grafana guardan una huella de las credenciales iniciales. Cambiar los valores de la credencial de AWX no cambia automáticamente las contraseñas de una instalación existente.
+
+No eliminar los archivos `.awx-initialized` para eludir esa comprobación.
+
+## 14. Problemas habituales
+
+| Mensaje o síntoma | Comprobación |
+|---|---|
+| `no hosts matched` | Revisar el nombre de `hosts:`, el grupo, sus miembros, el inventario y el campo Límite. |
+| `empty compose file` | Revisar el contenido real de la plantilla `.j2` en Git y la revisión utilizada por AWX. |
+| Error censurado al validar contraseñas | Revisar la credencial asociada y la coincidencia entre el inyector y los `lookup`. |
+| `Permission denied` al instalar paquetes | Revisar la credencial de Máquina y la elevación con sudo. |
+| Timeout al elevar con `sudo-rs` | Revisar compatibilidad de Ansible y sudo; en el servidor probado se utilizó `sudo.ws`. |
+| `Connection refused` | Revisar el estado del contenedor, su puerto publicado y sus logs. |
+| Grafana no conecta con Prometheus | Revisar Prometheus, la red compartida y la URL de la fuente de datos. |
+| Las variables no parecen aplicarse | Revisar posibles valores que las sobrescriben en la plantilla o workflow. |
+| Error al crear temporales en un agente | Revisar el sistema operativo, la shell y los permisos del usuario remoto. Los playbooks Linux no sirven directamente para Windows. |
+
+### Ver más información de una ejecución
+
+En la plantilla de trabajo:
+
+1. Pulsar **Editar**.
+2. Cambiar **Verbosidad** a `3 (Debug)`.
+3. Guardar.
+4. Ejecutar de nuevo.
+5. Revisar el error completo.
+
+No desactivar `no_log: true` en tareas con contraseñas para obtener más detalle.
+
+### Revisar los contenedores
+
+En el servidor Ubuntu:
+
+```bash
+sudo docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
+
+Consultar los logs de un contenedor concreto:
+
+```bash
+sudo docker logs --tail 80 NOMBRE_DEL_CONTENEDOR
+```
+
+Un contenedor encendido no garantiza que la aplicación haya terminado de arrancar. Por eso los playbooks incluyen comprobaciones HTTP.
+
+Un trabajo con `no hosts matched` puede finalizar sin ejecutar ninguna tarea. Revisar la salida de cada nodo del workflow, no solo su estado general.
