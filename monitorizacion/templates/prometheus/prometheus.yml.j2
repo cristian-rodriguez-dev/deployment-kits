@@ -16,15 +16,37 @@ scrape_configs:
 
 {% for var_departamento in var_prometheus_departamentos %}
   - job_name: {{ var_departamento.nombre | to_json }}
-{% if var_departamento.equipos | length > 0 %}
     static_configs:
+{% if var_departamento.equipos | length == 0 %}
+      []
+{% else %}
 {% for var_equipo in var_departamento.equipos %}
       - targets:
           - {{ (var_equipo.direccion ~ ':' ~ (var_equipo.puerto | default(9100) | string)) | to_json }}
         labels:
           nodename: {{ var_equipo.nombre | to_json }}
 {% endfor %}
-{% else %}
-    static_configs: []
 {% endif %}
+{% endfor %}
+
+{% set var_inventory_agents = [] %}
+{% for var_host in groups.get('monitoring-agents', []) | sort %}
+{% set var_agent = hostvars[var_host] %}
+{% set var_unused = var_inventory_agents.append({
+  'nombre': var_agent.var_prometheus_agent_name | default(var_host),
+  'direccion': var_agent.var_prometheus_target_address | default(var_agent.ansible_host | default(var_host)),
+  'puerto': var_agent.var_node_exporter_port | default(9100),
+  'departamento': var_agent.var_prometheus_department | default('Sin-departamento')
+}) %}
+{% endfor %}
+{% for var_department, var_agents in var_inventory_agents | groupby('departamento') %}
+  - job_name: {{ ('inventario-' ~ var_department) | to_json }}
+    static_configs:
+{% for var_agent in var_agents %}
+      - targets:
+          - {{ (var_agent.direccion ~ ':' ~ (var_agent.puerto | string)) | to_json }}
+        labels:
+          nodename: {{ var_agent.nombre | to_json }}
+          departamento: {{ var_department | to_json }}
+{% endfor %}
 {% endfor %}
