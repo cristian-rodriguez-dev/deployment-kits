@@ -58,10 +58,6 @@ El servidor debe disponer de:
 - Usuario SSH con permisos para utilizar sudo.
 - Docker instalado.
 - Docker Compose 2.18.0 o posterior.
-- Acceso a los repositorios y registros de imágenes necesarios.
-- Recursos suficientes para ejecutar los servicios.
-
-El entorno de ejecución de AWX debe poder conectarse por SSH al servidor.
 
 ### Entorno de ejecución de AWX
 
@@ -149,6 +145,7 @@ En AWX:
     | URL del repositorio | URL de `Nombre_Repositorio` |
     | Rama | `Rama_Git_Usada` |
     | Credencial de control de código fuente | Credencial de Git, solo si el repositorio es privado |
+    | Opciones | ✅ Limpiar <br> ✅ Permitir la anulación de la rama |
 
 3. Guardar.
 4. Sincronizar el proyecto.
@@ -165,9 +162,11 @@ Nombre: Nombre_Inventario
 Organización: Nombre_Organización
 ```
 
+Guardar.
+
 ### 5.2. Host
 
-Dentro del inventario, entrar en **Hosts → Añadir**.
+Dentro del inventario que se acaba de crear, entrar en **Servidores → Añadir**.
 
 Nombre:
 
@@ -190,6 +189,9 @@ Estas variables indican la IP del servidor y la elevación de privilegios median
 
 El usuario SSH se define en la credencial de Máquina.
 
+***(Revisar compatibilidad con sudo-rs antes de guardar)***
+Guardar.
+
 ### Compatibilidad con sudo-rs
 
 En el servidor utilizado durante las pruebas fue necesario añadir:
@@ -211,7 +213,7 @@ No añadir esta variable si el ejecutable no existe. No todos los servidores Ubu
 
 ### 5.3. Grupos
 
-Dentro del inventario, crear estos grupos:
+**Inventarios** -> **Nombre_Inventario** -> **Grupos** -> **Añadir** y crea estos tres grupos:
 
 ```text
 wazuh-servers
@@ -220,6 +222,7 @@ grafana-servers
 ```
 
 Asociar el host existente `ansible_server` a los tres grupos.
+***(Para ello -> Nombre_Grupo -> Servidores -> Añadir -> Agregar_Host_Existente -> Seleccionar Nombre_Host y Guardar)***
 
 No crear tres copias del mismo host.
 
@@ -241,7 +244,7 @@ hosts: grafana-servers
 
 Introducir los bloques en:
 
-**Inventario → Grupos → grupo correspondiente → Editar → Variables**:
+**Inventarios -> Nombre_Inventario → Grupos → grupo correspondiente → Editar → Variables**:
 
 Las variables propias de los playbooks utilizan el prefijo `var_`.
 
@@ -411,6 +414,7 @@ Credenciales Wazuh
 En configuración de entrada introducir:
 
 ```yaml
+---
 fields:
   - id: admin_password
     type: string
@@ -430,6 +434,7 @@ required:
 En configuración del inyector introducir:
 
 ```yaml
+---
 env:
   VAR_WAZUH_ADMIN_PASSWORD: "{{ admin_password }}"
   VAR_WAZUH_API_PASSWORD: "{{ api_password }}"
@@ -462,6 +467,8 @@ Requisitos de las contraseñas del playbook:
 - Administrador: al menos 8 caracteres.
 - API: entre 8 y 64 caracteres, con mayúscula, minúscula, número y símbolo.
 
+Guardar la credencial.
+
 ### 7.3. Tipo de credencial de Grafana
 
 Entrar en:
@@ -477,6 +484,7 @@ Credenciales Grafana
 En configuración de entrada introducir:
 
 ```yaml
+---
 fields:
   - id: admin_password
     type: string
@@ -490,6 +498,7 @@ required:
 En configuración del inyector introducir:
 
 ```yaml
+---
 env:
   VAR_GRAFANA_ADMIN_PASSWORD: "{{ admin_password }}"
 ```
@@ -501,7 +510,9 @@ var_grafana_admin_password: >-
   {{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}
 ```
 
-Después, crear la credencial:
+Guardar el tipo de credencial.
+
+Después, entrar en **Recursos → Credenciales → Añadir**:
 
 | Campo | Valor |
 | --- | --- |
@@ -511,6 +522,8 @@ Después, crear la credencial:
 | Contraseña del administrador | Contraseña_Real |
 
 El playbook exige al menos 8 caracteres, sin saltos de línea ni espacios al principio o al final.
+
+Guardar la credencial.
 
 ### 7.4. Correspondencia de nombres
 
