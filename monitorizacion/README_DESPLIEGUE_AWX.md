@@ -550,7 +550,7 @@ Configuración común:
 | Tipo de trabajo | Ejecutar |
 | Inventario | `Nombre_Inventario` |
 | Proyecto | `Nombre_Proyecto` |
-| Entorno de ejecución | Entorno con las dependencias necesarias *(Latest)* |
+| Entorno de ejecución | Entorno con las dependencias necesarias <br> *(AWX EE Latest)* |
 | Elevación de privilegios | Activada |
 
 Crear las siguientes plantillas:
@@ -587,7 +587,21 @@ Nombre:
 Nombre_WorkFlow
 ```
 
-Abrir el visualizador y añadir los nodos en este orden:
+Inventario:
+
+```text
+Nombre_Inventario
+```
+
+Organización:
+
+```text
+Nombre_Organización
+```
+
+Guardar.
+
+Iniciar el visualizador y añadir los nodos en este orden:
 
 1. `01 - Instalar Wazuh`.
 2. `02 - Configurar Wazuh`.
@@ -602,7 +616,7 @@ En caso de éxito / On Success
 
 Si se utiliza un playbook para instalación de Docker, situarlo antes de `01 - Instalar Wazuh`.
 
-Guardar el visualizador y el workflow.
+Guardar.
 
 Prometheus debe ejecutarse antes de Grafana, porque el instalador de Grafana comprueba la conexión con su fuente de datos.
 
