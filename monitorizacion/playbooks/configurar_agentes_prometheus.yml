@@ -1,0 +1,102 @@
+---
+- name: Configurar agentes remotos en Prometheus
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Comprobar variables necesarias
+      ansible.builtin.assert:
+        that:
+          - var_prometheus_install_dir is defined
+          - var_prometheus_project_name is defined
+          - var_prometheus_image is defined
+          - var_prometheus_port is defined
+          - var_prometheus_scrape_interval is defined
+          - var_prometheus_local_name is defined
+          - var_node_exporter_port is defined
+          - var_prometheus_departamentos is defined
+        fail_msg: >-
+          Configura las variables del servidor Prometheus
+          en el grupo prometheus-servers.
+
+    - name: Comprobar que existe la instalación
+      ansible.builtin.stat:
+        path: "{{ var_prometheus_install_dir }}/docker-compose.yml"
+      register: var_prometheus_compose_file
+
+    - name: Confirmar instalación previa
+      ansible.builtin.assert:
+        that:
+          - var_prometheus_compose_file.stat.isreg | default(false)
+        fail_msg: Ejecuta primero instalar_prometheus.yml.
+
+    - name: Comprobar variables de los equipos remotos
+      ansible.builtin.assert:
+        that:
+          - hostvars[var_remote_host].ansible_host is defined
+          - hostvars[var_remote_host].var_node_exporter_port is defined
+          - >-
+            (hostvars[var_remote_host].var_node_exporter_port | string)
+            is match('^[0-9]+$')
+          - hostvars[var_remote_host].var_node_exporter_port | int >= 1
+          - hostvars[var_remote_host].var_node_exporter_port | int <= 65535
+        fail_msg: >-
+          Define ansible_host y var_node_exporter_port
+          para cada equipo de monitoring-agents.
+      loop: "{{ groups.get('monitoring-agents', []) }}"
+      loop_control:
+        loop_var: var_remote_host
+        label: "{{ var_remote_host }}"
+
+  tasks:
+    - name: Generar y validar configuración antes de sustituirla
+      ansible.builtin.template:
+        src: ../templates/prometheus/prometheus.yml.j2
+        dest: "{{ var_prometheus_install_dir }}/prometheus/prometheus.yml"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        validate: >-
+          docker run --rm
+          --network none
+          --user 0:0
+          --entrypoint /bin/promtool
+          --volume %s:/tmp/prometheus.yml:ro
+          {{ var_prometheus_image }}
+          check config /tmp/prometheus.yml
+      notify: Reiniciar Prometheus
+
+    - name: Aplicar configuración pendiente
+      ansible.builtin.meta: flush_handlers
+
+    - name: Esperar a que Prometheus esté preparado
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ var_prometheus_port }}/-/ready"
+        status_code: 200
+        use_proxy: false
+      register: var_prometheus_ready
+      until: (var_prometheus_ready.status | default(0)) == 200
+      retries: 30
+      delay: 5
+
+    - name: Mostrar resultado
+      ansible.builtin.debug:
+        msg:
+          - >-
+            Configuración aplicada con
+            {{ groups.get('monitoring-agents', []) | length }}
+            equipo(s) del inventario.
+          - >-
+            Comprueba su estado UP en
+            http://{{ ansible_host | default(inventory_hostname) }}:{{ var_prometheus_port }}/targets
+
+  handlers:
+    - name: Reiniciar Prometheus
+      community.docker.docker_compose_v2:
+        project_src: "{{ var_prometheus_install_dir }}"
+        project_name: "{{ var_prometheus_project_name }}"
+        services:
+          - prometheus
+        state: restarted
