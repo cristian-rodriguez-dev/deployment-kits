@@ -54,8 +54,9 @@ No se incluye:
 El servidor debe disponer de:
 
 - Ubuntu.
-- Servicio SSH operativo.
-- Usuario SSH con permisos para utilizar sudo.
+- Python 3.
+- Servicio SSH.
+- Usuario SSH con permisos.
 - Docker instalado.
 - Docker Compose 2.18.0 o posterior.
 
