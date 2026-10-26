@@ -1,0 +1,155 @@
+
+---
+# No Implementada
+- name: Instalar y configurar Docker en Ubuntu
+  hosts: docker_servers
+  become: true
+  gather_facts: true
+
+---
+- name: Instalar y configurar Docker en Ubuntu
+  hosts: docker_servers
+  become: true
+  gather_facts: true
+
+  vars:
+    var_docker_apt_repo_url: "https://download.docker.com/linux/ubuntu"
+    var_docker_apt_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+    var_docker_apt_keyring: "/etc/apt/keyrings/docker.asc"
+
+    var_docker_paquetes:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+
+    var_docker_usuario: "{{ ansible_user }}"
+
+    # Comprobar siempre que no coincida con LAN, VPN,
+    # Kubernetes u otras redes existentes.
+    var_docker_default_address_pools:
+      - base: "172.20.0.0/16"
+        size: 24
+
+    var_docker_servicio: docker
+
+  tasks:
+    - name: Comprobar que el sistema operativo es Ubuntu
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+        fail_msg: "Este playbook solo está preparado para Ubuntu."
+
+    - name: Actualizar la caché de paquetes APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Instalar dependencias necesarias
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+
+    - name: Crear el directorio de claves APT
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Descargar la clave GPG oficial de Docker
+      ansible.builtin.get_url:
+        url: "{{ var_docker_apt_key_url }}"
+        dest: "{{ var_docker_apt_keyring }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Configurar el repositorio oficial de Docker
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{
+          {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(
+          ansible_architecture, ansible_architecture) }}
+          signed-by={{ var_docker_apt_keyring }}]
+          {{ var_docker_apt_repo_url }}
+          {{ ansible_distribution_release }} stable
+        filename: docker
+        state: present
+        update_cache: true
+
+    - name: Instalar Docker y sus componentes
+      ansible.builtin.apt:
+        name: "{{ var_docker_paquetes }}"
+        state: present
+        update_cache: true
+
+    - name: Crear el grupo docker
+      ansible.builtin.group:
+        name: docker
+        state: present
+
+    - name: Añadir el usuario al grupo docker
+      ansible.builtin.user:
+        name: "{{ var_docker_usuario }}"
+        groups:
+          - docker
+        append: true
+
+    - name: Configurar el daemon de Docker
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          {{
+            {
+              'default-address-pools':
+              var_docker_default_address_pools
+            } | to_nice_json
+          }}
+        validate: "dockerd --validate --config-file %s"
+      notify: Reiniciar Docker
+
+    - name: Habilitar e iniciar Docker
+      ansible.builtin.systemd_service:
+        name: "{{ var_docker_servicio }}"
+        enabled: true
+        state: started
+
+    - name: Aplicar los cambios pendientes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Comprobar la versión de Docker
+      ansible.builtin.command:
+        argv:
+          - docker
+          - --version
+      register: var_docker_version
+      changed_when: false
+
+    - name: Comprobar la versión de Docker Compose
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - version
+      register: var_docker_compose_version
+      changed_when: false
+
+    - name: Mostrar las versiones instaladas
+      ansible.builtin.debug:
+        msg:
+          - "{{ var_docker_version.stdout }}"
+          - "{{ var_docker_compose_version.stdout }}"
+
+  handlers:
+    - name: Reiniciar Docker
+      ansible.builtin.systemd_service:
+        name: "{{ var_docker_servicio }}"
+        state: restarted

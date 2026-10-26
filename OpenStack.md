@@ -23,6 +23,7 @@
 17. [Probar SSH y preparar el sistema invitado](#17-probar-ssh-y-preparar-el-sistema-invitado)
 18. [Registrar las VM en AWX](#18-registrar-las-vm-en-awx)
 19. [Verificar AWX antes del despliegue](#19-verificar-awx-antes-del-despliegue)
+20. [Preparar Docker y desplegar servicios](#20-preparar-docker-y-desplegar-servicios)
 
 ## 1. Qué hace cada herramienta
 
@@ -386,4 +387,15 @@ Las contraseñas de Wazuh y Grafana siguen en sus credenciales de aplicación.
 
 ## 19. Verificar AWX antes del despliegue
 
-Ejecutar una tarea ad hoc con módulo ping
+Ejecutar una tarea ad hoc con módulo ping sobre los tres hosts y la credencial SSH OpenStack. Resultado esperado: pong.
+
+Con los privilegios de escalado activados, ejecutar el módulo command con argumento:
+
+```text
+id
+```
+
+Tiene que aparecer uid=0(root).
+
+## 20. Preparar Docker y desplegar servicios
+

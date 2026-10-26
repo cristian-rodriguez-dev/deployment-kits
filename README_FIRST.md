@@ -1,8 +1,15 @@
 # TODO LO RELATIVO AL DESPLIEGUE ESTÁ EN LA CARPETA: MONITORIZACIÓN
 
-## OpenStack
+## Requisitos RAM
 
-## Proyectos interesantes de OpenStack
+- SO propio: ~2GB (WSL2/VMs)
+- OpenStack Sunbeam: ~16GB
+- AWX Ansible: al menos 4GB si no 8
+- VM para Wazuh: también unos 4-8GB
+- VM Kubernetes Servicios: al menos unos 2-4GB
+- **No puedo testearlo en el ordenador actual**, necesitaría como poco el doble de RAM
+
+## OpenStack
 
 1. **Nova**
 
@@ -67,9 +74,23 @@
 
 ## Especializado en Ubuntu -> OpenStack - Sunbeam
 
-Mete los componentes de OpenStack en contenedores, la instalación el SO de tu servidor.
+Mete los componentes de OpenStack en contenedores, no ensucia la instalación el SO de tu servidor.
 
 Para actualizar sirve con solo actualizar las imágenes de los contenedores en los K8s.
+
+Además de la base de OpenStack, cuando completas el despliegue de Sunbeam, instala todo un ecosistema de soporte de Canonical:
+
+MicroK8s -> Clúster de Kubernetes base que sirve de plataforma para los contenedores.
+
+Juju -> Orquestador de Canonical que gestiona ciclo de vida, comunicación y conexiones automáticas de los servicios.
+
+MicroCeph -> Almacenamiento definido por software (Ceph) simplificado que Sunbeam instala para dar soporte de almacenamiento de discos persistentes a tus futuras VMs.
+
+Open vSwitch / OVN -> Motor de redes virtuales avanzado que se encarga del enrutamiento interno del tráfico de la nube.
+
+Servicios de infraestructura (IaaS) -> Configura instancias de MySQL para las bases de datos internas y sistemas de colas de mensajería (RabbitMQ) de manera totalmente transparente.
+
+En caso de necesario servicios de contenedores (CaaS) -> Instalar módulo Magnum.
 
 ## Instalación (Revisarlo)
 

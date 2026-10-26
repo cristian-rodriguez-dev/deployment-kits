@@ -13,4 +13,4 @@
 # var_grafana_prometheus_url: http://prometheus:9090
 
 # La contraseña se proporciona mediante la credencial de AWX.
-# No escribirla en este archivo.
+# VAR_GRAFANA_ADMIN_PASSWORD
