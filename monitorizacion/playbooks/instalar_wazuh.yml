@@ -1,411 +1,145 @@
 ---
-- name: Instalar Wazuh en Ubuntu
-  hosts: wazuh-servers
+- name: Instalar y configurar Docker en Ubuntu
+  hosts: docker_servers
   become: true
   gather_facts: true
 
   vars:
-    var_wazuh_stack_dir: "{{ var_wazuh_install_dir }}/single-node"
-    var_wazuh_state_file: "{{ var_wazuh_install_dir }}/.awx-initialized"
+    var_docker_apt_repo_url: "https://download.docker.com/linux/ubuntu"
+    var_docker_apt_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+    var_docker_apt_keyring: "/etc/apt/keyrings/docker.asc"
 
-    var_wazuh_admin_password: >-
-      {{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}
+    var_docker_paquetes:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
 
-    var_wazuh_api_password: >-
-      {{ lookup('ansible.builtin.env', 'VAR_WAZUH_API_PASSWORD') }}
+    var_docker_usuario: "{{ ansible_user }}"
 
-    var_wazuh_credentials_fingerprint: >-
-      {{
-        [var_wazuh_admin_password, var_wazuh_api_password]
-        | to_json
-        | hash('sha256')
-      }}
+    var_docker_default_address_pools:
+      - base: "172.20.0.0/16"
+        size: 24
 
-  pre_tasks:
-    - name: Comprobar las variables necesarias
+    var_docker_servicio: docker
+
+  tasks:
+    - name: Comprobar que el sistema operativo es Ubuntu
       ansible.builtin.assert:
         that:
-          - var_wazuh_install_dir is defined
-          - var_wazuh_access_group is defined
-          - var_wazuh_dashboard_port is defined
-          - var_wazuh_project_name is defined
-          - var_wazuh_version is defined
-        fail_msg: >-
-          Faltan variables de Wazuh.
-          Configúralas en el grupo wazuh-servers de AWX.
+          - ansible_distribution == "Ubuntu"
+        fail_msg: "Este playbook solo está preparado para Ubuntu."
 
-    - name: Comprobar sistema operativo
-      ansible.builtin.assert:
-        that:
-          - ansible_facts['distribution'] == 'Ubuntu'
-        fail_msg: Este playbook está preparado para Ubuntu.
+    - name: Actualizar la caché de paquetes APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
 
-    - name: Validar directorio de instalación
-      ansible.builtin.assert:
-        that:
-          - var_wazuh_install_dir is match('^/')
-          - var_wazuh_install_dir != '/'
-        fail_msg: Indica una ruta absoluta válida para instalar Wazuh.
+    - name: Instalar dependencias necesarias
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
 
-    - name: Comprobar que existe el grupo de acceso
-      ansible.builtin.getent:
-        database: group
-        key: "{{ var_wazuh_access_group }}"
+    - name: Crear el directorio de claves APT
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
 
-    - name: Validar los requisitos de las contraseñas
-      ansible.builtin.assert:
-        that:
-          - var_wazuh_admin_password | length >= 8
-          - var_wazuh_api_password | length >= 8
-          - var_wazuh_api_password | length <= 64
-          - var_wazuh_api_password is search('[A-Z]')
-          - var_wazuh_api_password is search('[a-z]')
-          - var_wazuh_api_password is search('[0-9]')
-          - var_wazuh_api_password is search('[^a-zA-Z0-9\s]')
-        fail_msg: >-
-          Revisa las contraseñas de la credencial de Wazuh.
-          La API requiere entre 8 y 64 caracteres, mayúscula,
-          minúscula, número y símbolo.
-      no_log: true
+    - name: Descargar la clave GPG oficial de Docker
+      ansible.builtin.get_url:
+        url: "{{ var_docker_apt_key_url }}"
+        dest: "{{ var_docker_apt_keyring }}"
+        owner: root
+        group: root
+        mode: "0644"
 
-    - name: Validar el puerto del Dashboard
-      ansible.builtin.assert:
-        that:
-          - (var_wazuh_dashboard_port | string) is match('^[0-9]+$')
-          - var_wazuh_dashboard_port | int >= 1
-          - var_wazuh_dashboard_port | int <= 65535
-        fail_msg: El puerto debe estar entre 1 y 65535.
+    - name: Configurar el repositorio oficial de Docker
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{
+          {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(
+          ansible_architecture, ansible_architecture) }}
+          signed-by={{ var_docker_apt_keyring }}]
+          {{ var_docker_apt_repo_url }}
+          {{ ansible_distribution_release }} stable
+        filename: docker
+        state: present
+        update_cache: true
 
-    - name: Comprobar que Docker funciona
+    - name: Instalar Docker y sus componentes
+      ansible.builtin.apt:
+        name: "{{ var_docker_paquetes }}"
+        state: present
+        update_cache: true
+
+    - name: Crear el grupo docker
+      ansible.builtin.group:
+        name: docker
+        state: present
+
+    - name: Añadir el usuario al grupo docker
+      ansible.builtin.user:
+        name: "{{ var_docker_usuario }}"
+        groups:
+          - docker
+        append: true
+
+    - name: Configurar el daemon de Docker
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          {{
+            {
+              'default-address-pools':
+              var_docker_default_address_pools
+            } | to_nice_json
+          }}
+        validate: "dockerd --validate --config-file %s"
+      notify: Reiniciar Docker
+
+    - name: Habilitar e iniciar Docker
+      ansible.builtin.systemd_service:
+        name: "{{ var_docker_servicio }}"
+        enabled: true
+        state: started
+
+    - name: Aplicar los cambios pendientes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Comprobar la versión de Docker
       ansible.builtin.command:
         argv:
           - docker
-          - info
+          - --version
+      register: var_docker_version
       changed_when: false
 
-    - name: Comprobar Docker Compose
+    - name: Comprobar la versión de Docker Compose
       ansible.builtin.command:
         argv:
           - docker
           - compose
           - version
-          - --short
-      register: var_wazuh_compose_version
+      register: var_docker_compose_version
       changed_when: false
 
-    - name: Comprobar la versión mínima de Compose
-      ansible.builtin.assert:
-        that:
-          - >-
-            (var_wazuh_compose_version.stdout | trim
-            | regex_replace('^v', ''))
-            is version('2.18.0', '>=')
-        fail_msg: Se necesita Docker Compose 2.18.0 o posterior.
-
-    - name: Comprobar si AWX ya preparó esta instalación
-      ansible.builtin.stat:
-        path: "{{ var_wazuh_state_file }}"
-      register: var_wazuh_state
-
-    - name: Leer la huella de las credenciales anteriores
-      ansible.builtin.slurp:
-        src: "{{ var_wazuh_state_file }}"
-      register: var_wazuh_saved_credentials
-      when: var_wazuh_state.stat.exists
-      no_log: true
-
-    - name: Evitar cambiar contraseñas mediante el instalador
-      ansible.builtin.assert:
-        that:
-          - >-
-            (var_wazuh_saved_credentials.content | b64decode | trim)
-            == var_wazuh_credentials_fingerprint
-        fail_msg: >-
-          Las credenciales no coinciden con las de la instalación.
-          Utiliza un procedimiento de rotación de contraseñas.
-      when: var_wazuh_state.stat.exists
-      no_log: true
-
-    - name: Buscar volúmenes de una instalación anterior
-      ansible.builtin.command:
-        argv:
-          - docker
-          - volume
-          - ls
-          - --quiet
-          - --filter
-          - "label=com.docker.compose.project={{ var_wazuh_project_name }}"
-      register: var_wazuh_existing_volumes
-      changed_when: false
-      when: not var_wazuh_state.stat.exists
-
-    - name: Evitar reutilizar una instalación no gestionada por este playbook
-      ansible.builtin.assert:
-        that:
-          - var_wazuh_existing_volumes.stdout | trim == ''
-        fail_msg: >-
-          Existen volúmenes de este proyecto Docker.
-          La instalación anterior necesita una migración.
-          No se ha eliminado ningún volumen.
-      when: not var_wazuh_state.stat.exists
-
-  tasks:
-    - name: Instalar Git
-      ansible.builtin.apt:
-        name: git
-        state: present
-        update_cache: true
-        cache_valid_time: 3600
-
-    - name: Configurar vm.max_map_count para el Indexer
-      ansible.posix.sysctl:
-        name: vm.max_map_count
-        value: "262144"
-        state: present
-        sysctl_set: true
-        reload: true
-        sysctl_file: /etc/sysctl.d/99-wazuh.conf
-
-    - name: Crear el directorio y permitir el acceso a tu grupo
-      ansible.builtin.file:
-        path: "{{ var_wazuh_install_dir }}"
-        state: directory
-        owner: root
-        group: "{{ var_wazuh_access_group }}"
-        mode: "0750"
-
-    - name: Descargar el repositorio oficial de Wazuh
-      ansible.builtin.git:
-        repo: https://github.com/wazuh/wazuh-docker.git
-        dest: "{{ var_wazuh_install_dir }}"
-        version: "v{{ var_wazuh_version }}"
-        depth: 1
-        update: false
-        force: false
-
-    - name: Permitir el acceso al directorio single-node
-      ansible.builtin.file:
-        path: "{{ var_wazuh_stack_dir }}"
-        state: directory
-        owner: root
-        group: "{{ var_wazuh_access_group }}"
-        mode: "0750"
-
-    - name: Verificar la versión del repositorio descargado
-      ansible.builtin.command:
-        argv:
-          - git
-          - describe
-          - --tags
-          - --exact-match
-        chdir: "{{ var_wazuh_install_dir }}"
-      register: var_wazuh_git_version
-      changed_when: false
-      failed_when: >-
-        var_wazuh_git_version.rc != 0 or
-        (var_wazuh_git_version.stdout | trim)
-        != ('v' ~ var_wazuh_version)
-
-    - name: Leer el archivo Docker Compose
-      ansible.builtin.slurp:
-        src: "{{ var_wazuh_stack_dir }}/docker-compose.yml"
-      register: var_wazuh_compose_raw
-      no_log: true
-
-    - name: Interpretar la configuración de Docker Compose
-      ansible.builtin.set_fact:
-        var_wazuh_compose: >-
-          {{ var_wazuh_compose_raw.content | b64decode | from_yaml }}
-      no_log: true
-
-    - name: Configurar el puerto externo del Dashboard
-      ansible.builtin.copy:
-        dest: "{{ var_wazuh_stack_dir }}/docker-compose.yml"
-        owner: root
-        group: root
-        mode: "0600"
-        content: >-
-          {{
-            var_wazuh_compose
-            | combine(
-                {
-                  'services': {
-                    'wazuh.dashboard': {
-                      'ports': [
-                        (var_wazuh_dashboard_port | string) ~ ':5601'
-                      ]
-                    }
-                  }
-                },
-                recursive=true
-              )
-            | to_nice_yaml(indent=2, width=4096)
-          }}
-      no_log: true
-      diff: false
-
-    - name: Crear el archivo de credenciales de Compose
-      ansible.builtin.template:
-        src: ../templates/wazuh/compose.credentials.yml.j2
-        dest: "{{ var_wazuh_stack_dir }}/compose.credentials.yml"
-        owner: root
-        group: root
-        mode: "0600"
-      no_log: true
-      diff: false
-
-    - name: Preparar las credenciales antes del primer arranque
-      when: not var_wazuh_state.stat.exists
-      block:
-        - name: Generar el hash de ADMIN en un contenedor temporal
-          ansible.builtin.command:
-            argv:
-              - docker
-              - run
-              - --rm
-              - --entrypoint
-              - bash
-              - -e
-              - JAVA_HOME=/usr/share/wazuh-indexer/jdk
-              - "wazuh/wazuh-indexer:{{ var_wazuh_version }}"
-              - /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh
-              - -p
-              - "{{ var_wazuh_admin_password }}"
-          register: var_wazuh_hash_result
-          changed_when: true
-          no_log: true
-
-        - name: Obtener el hash generado
-          ansible.builtin.set_fact:
-            var_wazuh_admin_hash: >-
-              {{ var_wazuh_hash_result.stdout_lines | last | trim }}
-          no_log: true
-
-        - name: Validar el formato del hash
-          ansible.builtin.assert:
-            that:
-              - >-
-                var_wazuh_admin_hash
-                is match('^[$]2[aby][$][0-9]{2}[$][./A-Za-z0-9]{53}$')
-          no_log: true
-
-        - name: Aplicar el hash únicamente a ADMIN
-          ansible.builtin.replace:
-            path: "{{ var_wazuh_stack_dir }}/config/wazuh_indexer/internal_users.yml"
-            regexp: '(?m)(^admin:\s*\n[ \t]+hash:)[^\n]*'
-            replace: '\g<1> "{{ var_wazuh_admin_hash }}"'
-          no_log: true
-          diff: false
-
-        - name: Leer los usuarios para verificar el cambio
-          ansible.builtin.slurp:
-            src: "{{ var_wazuh_stack_dir }}/config/wazuh_indexer/internal_users.yml"
-          register: var_wazuh_users_check
-          no_log: true
-
-        - name: Confirmar que ADMIN tiene el hash correcto
-          ansible.builtin.assert:
-            that:
-              - >-
-                (var_wazuh_users_check.content | b64decode | from_yaml)
-                ['admin']['hash'] == var_wazuh_admin_hash
-          no_log: true
-
-        - name: Configurar la conexión del Dashboard con la API
-          ansible.builtin.copy:
-            dest: "{{ var_wazuh_stack_dir }}/config/wazuh_dashboard/wazuh.yml"
-            owner: root
-            group: root
-            mode: "0644"
-            content: |
-              hosts:
-                - 1513629884013:
-                    url: "https://wazuh.manager"
-                    port: 55000
-                    username: wazuh-wui
-                    password: {{ var_wazuh_api_password | to_json }}
-                    run_as: true
-          no_log: true
-          diff: false
-
-    - name: Generar los certificados iniciales
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - -p
-          - "{{ var_wazuh_project_name }}"
-          - -f
-          - generate-indexer-certs.yml
-          - run
-          - --rm
-          - generator
-        chdir: "{{ var_wazuh_stack_dir }}"
-        creates: "{{ var_wazuh_install_dir }}/.awx-certificates-ready"
-
-    - name: Registrar que el generador de certificados terminó correctamente
-      ansible.builtin.copy:
-        dest: "{{ var_wazuh_install_dir }}/.awx-certificates-ready"
-        content: "Certificados generados\n"
-        owner: root
-        group: root
-        mode: "0600"
-
-    - name: Validar la configuración de Compose
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - -p
-          - "{{ var_wazuh_project_name }}"
-          - -f
-          - docker-compose.yml
-          - -f
-          - compose.credentials.yml
-          - config
-          - --quiet
-        chdir: "{{ var_wazuh_stack_dir }}"
-      changed_when: false
-      no_log: true
-
-    - name: Registrar la preparación antes de crear los volúmenes
-      ansible.builtin.copy:
-        dest: "{{ var_wazuh_state_file }}"
-        content: "{{ var_wazuh_credentials_fingerprint }}\n"
-        owner: root
-        group: root
-        mode: "0600"
-      no_log: true
-      diff: false
-
-    - name: Arrancar los servicios de Wazuh
-      community.docker.docker_compose_v2:
-        project_src: "{{ var_wazuh_stack_dir }}"
-        project_name: "{{ var_wazuh_project_name }}"
-        files:
-          - docker-compose.yml
-          - compose.credentials.yml
-        state: present
-        pull: missing
-        recreate: auto
-      no_log: true
-
-    - name: Esperar a que el Dashboard responda
-      ansible.builtin.uri:
-        url: "https://127.0.0.1:{{ var_wazuh_dashboard_port }}/"
-        validate_certs: false
-        follow_redirects: none
-        status_code:
-          - 200
-          - 302
-      register: var_wazuh_dashboard_check
-      until: (var_wazuh_dashboard_check.status | default(0)) in [200, 302]
-      retries: 60
-      delay: 10
-
-    - name: Mostrar resultado
+    - name: Mostrar las versiones instaladas
       ansible.builtin.debug:
         msg:
-          - "El Dashboard de Wazuh responde correctamente."
-          - "Directorio: {{ var_wazuh_stack_dir }}"
-          - "Grupo con acceso al directorio: {{ var_wazuh_access_group }}"
+          - "{{ var_docker_version.stdout }}"
+          - "{{ var_docker_compose_version.stdout }}"
+
+  handlers:
+    - name: Reiniciar Docker
+      ansible.builtin.systemd_service:
+        name: "{{ var_docker_servicio }}"
+        state: restarted
