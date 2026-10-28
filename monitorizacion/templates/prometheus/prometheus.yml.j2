@@ -14,7 +14,8 @@ scrape_configs:
         labels:
           nodename: {{ var_prometheus_local_name | to_json }}
           departamento: {{ var_prometheus_local_department | to_json }}
-
+          ip: {{ (ansible_host | default(inventory_hostname)) | to_json }}
+          
 {% for var_departamento in var_prometheus_departamentos %}
   - job_name: {{ var_departamento.nombre | to_json }}
     static_configs:
