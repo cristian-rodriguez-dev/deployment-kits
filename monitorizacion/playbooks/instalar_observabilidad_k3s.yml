@@ -1,0 +1,77 @@
+---
+- name: Desplegar componentes de observabilidad en K3s
+  hosts: prometheus-servers
+  become: true
+  gather_facts: true
+
+  vars:
+    var_k3s_manifests_dir: /var/lib/rancher/k3s/server/manifests
+
+  tasks:
+    - name: Comprobar que K3s está instalado
+      ansible.builtin.command:
+        cmd: systemctl is-active k3s
+      register: var_k3s_status
+      changed_when: false
+      failed_when: var_k3s_status.stdout.strip() != "active"
+
+    - name: Comprobar acceso al clúster Kubernetes
+      ansible.builtin.command:
+        cmd: kubectl get nodes
+      register: var_kubectl_check
+      changed_when: false
+
+    - name: Mostrar estado del clúster
+      ansible.builtin.debug:
+        msg: "K3s disponible. Se desplegarán los componentes de observabilidad habilitados."
+
+    - name: Comprobar directorio de manifiestos de K3s
+      ansible.builtin.file:
+        path: "{{ var_k3s_manifests_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Desplegar manifiesto HelmChart de kube-state-metrics
+      ansible.builtin.template:
+        src: kube-state-metrics.yaml.j2
+        dest: "{{ var_k3s_manifests_dir }}/kube-state-metrics.yaml"
+        owner: root
+        group: root
+        mode: "0600"
+      when: var_kube_state_metrics_enabled | bool
+      register: var_kube_state_metrics_manifest
+
+    - name: Esperar a que K3s registre kube-state-metrics
+      ansible.builtin.command:
+        cmd: kubectl get helmchart kube-state-metrics -n kube-system
+      register: var_ksm_helmchart
+      changed_when: false
+      retries: 20
+      delay: 5
+      until: var_ksm_helmchart.rc == 0
+      when: var_kube_state_metrics_enabled | bool
+
+    - name: Esperar a que kube-state-metrics esté disponible
+      ansible.builtin.command:
+        cmd: >
+          kubectl rollout status deployment/kube-state-metrics
+          -n {{ var_k3s_monitoring_namespace }}
+          --timeout=180s
+      changed_when: false
+      when: var_kube_state_metrics_enabled | bool
+
+    - name: Mostrar servicio kube-state-metrics
+      ansible.builtin.command:
+        cmd: >
+          kubectl get svc kube-state-metrics
+          -n {{ var_k3s_monitoring_namespace }}
+      register: var_ksm_service
+      changed_when: false
+      when: var_kube_state_metrics_enabled | bool
+
+    - name: Mostrar resultado del despliegue
+      ansible.builtin.debug:
+        var: var_ksm_service.stdout_lines
+      when: var_kube_state_metrics_enabled | bool
