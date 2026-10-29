@@ -16,6 +16,15 @@ scrape_configs:
           departamento: {{ var_prometheus_local_department | to_json }}
           ip: {{ (ansible_host | default(inventory_hostname)) | to_json }}
 
+  - job_name: "traefik"
+    static_configs:
+      - targets:
+          - "host.docker.internal:31090"
+        labels:
+          nodename: "Servidor-Principal"
+          departamento: "Infraestructura"
+          service: "traefik"
+          
 {% for var_departamento in var_prometheus_departamentos %}
   - job_name: {{ var_departamento.nombre | to_json }}
     static_configs:
