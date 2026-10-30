@@ -11,8 +11,14 @@ services:
       - "host.docker.internal:host-gateway"
 
     volumes:
+      # Configuración de Prometheus
       - "{{ var_prometheus_install_dir }}/prometheus:/etc/prometheus:ro"
+
+      # Datos persistentes de Prometheus
       - "{{ var_prometheus_install_dir }}/data:/prometheus"
+
+      # Credenciales para acceder a K3s / kubelet / cAdvisor
+      - "{{ var_prometheus_kubernetes_credentials_dir }}:/etc/prometheus/kubernetes:ro"
 
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"

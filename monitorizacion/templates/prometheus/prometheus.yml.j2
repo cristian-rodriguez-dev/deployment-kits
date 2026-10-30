@@ -2,10 +2,18 @@ global:
   scrape_interval: {{ var_prometheus_scrape_interval | to_json }}
 
 scrape_configs:
+  # ============================================================
+  # PROMETHEUS
+  # ============================================================
+
   - job_name: "prometheus"
     static_configs:
       - targets:
           - "localhost:9090"
+
+  # ============================================================
+  # NODE EXPORTER LOCAL
+  # ============================================================
 
   - job_name: "node-exporter-local"
     static_configs:
@@ -16,6 +24,10 @@ scrape_configs:
           departamento: {{ var_prometheus_local_department | to_json }}
           ip: {{ (ansible_host | default(inventory_hostname)) | to_json }}
 
+  # ============================================================
+  # TRAEFIK
+  # ============================================================
+
   - job_name: "traefik"
     static_configs:
       - targets:
@@ -25,7 +37,11 @@ scrape_configs:
           departamento: {{ var_prometheus_local_department | to_json }}
           ip: {{ (ansible_host | default(inventory_hostname)) | to_json }}
           service: "traefik"
-  
+
+  # ============================================================
+  # KUBE-STATE-METRICS
+  # ============================================================
+
   - job_name: "kube-state-metrics"
     static_configs:
       - targets:
@@ -35,6 +51,37 @@ scrape_configs:
           departamento: {{ var_prometheus_local_department | to_json }}
           ip: {{ (ansible_host | default(inventory_hostname)) | to_json }}
           service: "kube-state-metrics"
+
+  # ============================================================
+  # KUBELET / CADVISOR
+  # CPU Y RAM DE PODS Y CONTENEDORES
+  # ============================================================
+
+  - job_name: "kubelet-cadvisor"
+
+    scheme: https
+
+    metrics_path: "/api/v1/nodes/{{ var_k3s_node_name }}/proxy/metrics/cadvisor"
+
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/kubernetes/kubelet.token
+
+    tls_config:
+      ca_file: /etc/prometheus/kubernetes/k3s-ca.crt
+
+    static_configs:
+      - targets:
+          - "{{ ansible_host | default(inventory_hostname) }}:6443"
+        labels:
+          nodename: {{ var_prometheus_local_name | to_json }}
+          departamento: {{ var_prometheus_local_department | to_json }}
+          ip: {{ (ansible_host | default(inventory_hostname)) | to_json }}
+          service: "kubelet-cadvisor"
+
+  # ============================================================
+  # DEPARTAMENTOS DEFINIDOS MANUALMENTE
+  # ============================================================
 
 {% for var_departamento in var_prometheus_departamentos %}
   - job_name: {{ var_departamento.nombre | to_json }}
@@ -51,6 +98,10 @@ scrape_configs:
 {% endif %}
 {% endfor %}
 
+  # ============================================================
+  # AGENTES GENERADOS DESDE EL INVENTARIO DE AWX
+  # ============================================================
+
 {% set var_inventory_agents = [] %}
 {% for var_host in groups.get('monitoring-agents', []) | sort %}
 {% set var_agent = hostvars[var_host] %}
@@ -61,6 +112,7 @@ scrape_configs:
   'departamento': var_agent.var_prometheus_department | default('Sin-departamento')
 }) %}
 {% endfor %}
+
 {% for var_department, var_agents in var_inventory_agents | groupby('departamento') %}
   - job_name: {{ ('inventario-' ~ var_department) | to_json }}
     static_configs:

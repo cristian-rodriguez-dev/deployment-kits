@@ -6,8 +6,13 @@
 
   vars:
     var_k3s_manifests_dir: /var/lib/rancher/k3s/server/manifests
+    var_prometheus_container_gid: "65534"
 
   tasks:
+    # ============================================================
+    # VALIDACIONES K3S
+    # ============================================================
+
     - name: Comprobar que K3s está instalado
       ansible.builtin.command:
         cmd: systemctl is-active k3s
@@ -32,6 +37,10 @@
         owner: root
         group: root
         mode: "0700"
+
+    # ============================================================
+    # KUBE-STATE-METRICS
+    # ============================================================
 
     - name: Desplegar manifiesto HelmChart de kube-state-metrics
       ansible.builtin.template:
@@ -71,6 +80,10 @@
       changed_when: false
       when: var_kube_state_metrics_enabled | bool
 
+    # ============================================================
+    # ACCESO PROMETHEUS -> KUBELET / CADVISOR
+    # ============================================================
+
     - name: Desplegar acceso de Prometheus a métricas del kubelet
       ansible.builtin.template:
         src: ../templates/kubelet/prometheus-kubelet-access.yaml.j2
@@ -82,7 +95,7 @@
     - name: Esperar a que Kubernetes genere el token de Prometheus
       ansible.builtin.shell: |
         kubectl get secret prometheus-kubelet-token \
-          -n monitoring \
+          -n {{ var_k3s_monitoring_namespace }} \
           -o jsonpath='{.data.token}' | base64 -d
       register: var_prometheus_kubelet_token
       changed_when: false
@@ -91,33 +104,64 @@
       delay: 3
       until: var_prometheus_kubelet_token.stdout | length > 0
 
+    # ============================================================
+    # CREDENCIALES PARA PROMETHEUS
+    # ============================================================
+
     - name: Crear directorio para credenciales Kubernetes de Prometheus
       ansible.builtin.file:
-        path: /etc/prometheus/kubernetes
+        path: "{{ var_prometheus_kubernetes_credentials_dir }}"
         state: directory
         owner: root
-        group: root
-        mode: "0700"
+        group: "{{ var_prometheus_container_gid }}"
+        mode: "0750"
 
     - name: Guardar token kubelet para Prometheus
       ansible.builtin.copy:
         content: "{{ var_prometheus_kubelet_token.stdout }}"
-        dest: /etc/prometheus/kubernetes/kubelet.token
+        dest: "{{ var_prometheus_kubernetes_credentials_dir }}/kubelet.token"
         owner: root
-        group: root
-        mode: "0600"
+        group: "{{ var_prometheus_container_gid }}"
+        mode: "0640"
       no_log: true
 
     - name: Copiar CA de K3s para Prometheus
       ansible.builtin.copy:
         src: /var/lib/rancher/k3s/server/tls/server-ca.crt
-        dest: /etc/prometheus/kubernetes/k3s-ca.crt
+        dest: "{{ var_prometheus_kubernetes_credentials_dir }}/k3s-ca.crt"
         remote_src: true
         owner: root
-        group: root
-        mode: "0644"
+        group: "{{ var_prometheus_container_gid }}"
+        mode: "0640"
 
-    - name: Mostrar resultado del despliegue
+    # ============================================================
+    # VERIFICACIONES
+    # ============================================================
+
+    - name: Comprobar permisos del directorio de credenciales
+      ansible.builtin.command:
+        cmd: stat -c '%U:%G %a %n' /etc/prometheus/kubernetes
+      register: var_prometheus_kubernetes_dir_permissions
+      changed_when: false
+
+    - name: Comprobar permisos de las credenciales
+      ansible.builtin.command:
+        cmd: >
+          stat -c '%U:%G %a %n'
+          /etc/prometheus/kubernetes/kubelet.token
+          /etc/prometheus/kubernetes/k3s-ca.crt
+      register: var_prometheus_kubernetes_file_permissions
+      changed_when: false
+
+    - name: Mostrar permisos del directorio
+      ansible.builtin.debug:
+        var: var_prometheus_kubernetes_dir_permissions.stdout_lines
+
+    - name: Mostrar permisos de las credenciales
+      ansible.builtin.debug:
+        var: var_prometheus_kubernetes_file_permissions.stdout_lines
+
+    - name: Mostrar resultado del despliegue de kube-state-metrics
       ansible.builtin.debug:
         var: var_ksm_service.stdout_lines
       when: var_kube_state_metrics_enabled | bool
