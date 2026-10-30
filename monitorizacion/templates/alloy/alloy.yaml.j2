@@ -23,6 +23,10 @@ spec:
     alloy:
       enableReporting: false
 
+      securityContext:
+        privileged: true
+        runAsUser: 0
+
       storagePath: /var/lib/alloy/data
 
       mounts:
@@ -151,8 +155,8 @@ spec:
 
             forward_to = [loki.process.docker.receiver]
 
-            tail_from_end           = true
-            on_positions_file_error = "restart_from_end"
+            tail_from_end            = true
+            on_positions_file_error  = "restart_from_end"
 
             file_match {
               enabled     = true
