@@ -105,7 +105,7 @@
       until: var_prometheus_kubelet_token.stdout | length > 0
 
     # ============================================================
-    # CREDENCIALES PARA PROMETHEUS
+    # CREDENCIALES PROMETHEUS -> KUBERNETES
     # ============================================================
 
     - name: Crear directorio para credenciales Kubernetes de Prometheus
@@ -134,6 +134,24 @@
         group: "{{ var_prometheus_container_gid }}"
         mode: "0640"
 
+    - name: Asegurar permisos del directorio de credenciales
+      ansible.builtin.file:
+        path: "{{ var_prometheus_kubernetes_credentials_dir }}"
+        owner: root
+        group: "{{ var_prometheus_container_gid }}"
+        mode: "0750"
+        state: directory
+
+    - name: Asegurar permisos de los archivos de credenciales
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: root
+        group: "{{ var_prometheus_container_gid }}"
+        mode: "0640"
+        state: file
+      loop:
+        - "{{ var_prometheus_kubernetes_credentials_dir }}/kubelet.token"
+        - "{{ var_prometheus_kubernetes_credentials_dir }}/k3s-ca.crt"
     # ============================================================
     # VERIFICACIONES
     # ============================================================
