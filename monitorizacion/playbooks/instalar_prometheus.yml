@@ -142,6 +142,7 @@
           --user 0:0
           --entrypoint /bin/promtool
           --volume %s:/tmp/prometheus.yml:ro
+          --volume {{ var_prometheus_kubernetes_credentials_dir }}:/etc/prometheus/kubernetes:ro
           {{ var_prometheus_image }}
           check config /tmp/prometheus.yml
       notify: Recargar configuración de Prometheus
