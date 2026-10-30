@@ -177,6 +177,20 @@
       until: var_loki_helmchart.rc == 0
       when: var_loki_enabled | bool
 
+    - name: Esperar a que Loki cree sus pods
+      ansible.builtin.command:
+        cmd: >
+          kubectl get pods
+          -n {{ var_loki_namespace }}
+          -l app.kubernetes.io/name=loki
+          -o name
+      register: var_loki_created_pods
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: var_loki_created_pods.stdout | trim | length > 0
+      when: var_loki_enabled | bool
+
     - name: Esperar a que los pods de Loki estén preparados
       ansible.builtin.command:
         cmd: >
