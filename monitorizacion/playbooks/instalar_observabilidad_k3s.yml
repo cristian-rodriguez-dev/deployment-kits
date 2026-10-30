@@ -228,6 +228,68 @@
       when: var_loki_enabled | bool
 
     # ============================================================
+    # ALLOY
+    # ============================================================
+
+    - name: Desplegar manifiesto HelmChart de Alloy
+      ansible.builtin.template:
+        src: ../templates/alloy/alloy.yaml.j2
+        dest: "{{ var_k3s_manifests_dir }}/alloy.yaml"
+        owner: root
+        group: root
+        mode: "0600"
+      when: var_alloy_enabled | bool
+      register: var_alloy_manifest
+
+    - name: Esperar a que K3s registre Alloy
+      ansible.builtin.command:
+        cmd: kubectl get helmchart alloy -n kube-system
+      register: var_alloy_helmchart
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: var_alloy_helmchart.rc == 0
+      when: var_alloy_enabled | bool
+
+    - name: Esperar a que Alloy cree sus pods
+      ansible.builtin.command:
+        cmd: >
+          kubectl get pods
+          -n {{ var_alloy_namespace }}
+          -l app.kubernetes.io/name=alloy
+          -o name
+      register: var_alloy_created_pods
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: var_alloy_created_pods.stdout | trim | length > 0
+      when: var_alloy_enabled | bool
+
+    - name: Esperar a que Alloy esté preparado
+      ansible.builtin.command:
+        cmd: >
+          kubectl wait
+          --for=condition=Ready
+          pod
+          -l app.kubernetes.io/name=alloy
+          -n {{ var_alloy_namespace }}
+          --timeout=300s
+      changed_when: false
+      when: var_alloy_enabled | bool
+
+    - name: Obtener pods de Alloy
+      ansible.builtin.command:
+        cmd: kubectl get pods -n {{ var_alloy_namespace }} -o wide
+      register: var_alloy_pods
+      changed_when: false
+      when: var_alloy_enabled | bool
+
+    - name: Mostrar pods de Alloy
+      ansible.builtin.debug:
+        var: var_alloy_pods.stdout_lines
+      when: var_alloy_enabled | bool
+
+    # ============================================================
     # VERIFICACIONES
     # ============================================================
 
