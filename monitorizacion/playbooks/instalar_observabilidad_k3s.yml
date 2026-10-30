@@ -35,7 +35,7 @@
 
     - name: Desplegar manifiesto HelmChart de kube-state-metrics
       ansible.builtin.template:
-        src: kube-state-metrics.yaml.j2
+        src: ../templates/kube_state_metrics/kube-state-metrics.yaml.j2
         dest: "{{ var_k3s_manifests_dir }}/kube-state-metrics.yaml"
         owner: root
         group: root
