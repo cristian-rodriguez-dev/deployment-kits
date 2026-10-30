@@ -23,6 +23,21 @@ spec:
     alloy:
       enableReporting: false
 
+      storagePath: /var/lib/alloy/data
+
+      mounts:
+        varlog: true
+        dockercontainers: true
+
+        extra:
+          - name: run-log
+            mountPath: /run/log
+            readOnly: true
+
+          - name: alloy-storage
+            mountPath: /var/lib/alloy
+            readOnly: false
+
       configMap:
         create: true
         content: |-
@@ -31,17 +46,13 @@ spec:
             format = "logfmt"
           }
 
-          // ------------------------------------------------------
-          // DESCUBRIMIENTO DE PODS KUBERNETES
-          // ------------------------------------------------------
+          // ======================================================
+          // KUBERNETES
+          // ======================================================
 
           discovery.kubernetes "pods" {
             role = "pod"
           }
-
-          // ------------------------------------------------------
-          // LABELS LIMPIOS PARA LOKI
-          // ------------------------------------------------------
 
           discovery.relabel "kubernetes_pods" {
             targets = discovery.kubernetes.pods.targets
@@ -83,18 +94,84 @@ spec:
             }
           }
 
-          // ------------------------------------------------------
-          // RECOGIDA DE LOGS DE KUBERNETES
-          // ------------------------------------------------------
-
           loki.source.kubernetes "pods" {
             targets    = discovery.relabel.kubernetes_pods.output
             forward_to = [loki.write.local.receiver]
           }
 
-          // ------------------------------------------------------
+          // ======================================================
+          // JOURNALD DEL SERVIDOR
+          // ======================================================
+
+          loki.relabel "host_journal" {
+            forward_to = []
+
+            rule {
+              source_labels = ["__journal__systemd_unit"]
+              target_label  = "unit"
+            }
+
+            rule {
+              source_labels = ["__journal_priority_keyword"]
+              target_label  = "priority"
+            }
+
+            rule {
+              source_labels = ["__journal_syslog_identifier"]
+              target_label  = "syslog_identifier"
+            }
+
+            rule {
+              source_labels = ["__journal__hostname"]
+              target_label  = "journal_hostname"
+            }
+          }
+
+          loki.source.journal "host" {
+            max_age       = "12h"
+            relabel_rules = loki.relabel.host_journal.rules
+
+            labels = {
+              source = "journal",
+              host   = {{ var_prometheus_local_name | to_json }},
+            }
+
+            forward_to = [loki.write.local.receiver]
+          }
+
+          // ======================================================
+          // LOGS DOCKER
+          // ======================================================
+
+          loki.source.file "docker" {
+            targets = [
+              {
+                __path__ = "/var/lib/docker/containers/*/*-json.log",
+                source   = "docker",
+                host     = {{ var_prometheus_local_name | to_json }},
+              },
+            ]
+
+            forward_to = [loki.process.docker.receiver]
+
+            tail_from_end           = true
+            on_positions_file_error = "restart_from_end"
+
+            file_match {
+              enabled     = true
+              sync_period = "10s"
+            }
+          }
+
+          loki.process "docker" {
+            stage.docker {}
+
+            forward_to = [loki.write.local.receiver]
+          }
+
+          // ======================================================
           // ENVÍO A LOKI
-          // ------------------------------------------------------
+          // ======================================================
 
           loki.write "local" {
             external_labels = {
@@ -122,7 +199,22 @@ spec:
       type: deployment
       replicas: 1
 
-    # No necesitamos exponer Alloy fuera del clúster.
+      volumes:
+        extra:
+          - name: run-log
+            hostPath:
+              path: /run/log
+              type: Directory
+
+          - name: alloy-storage
+            hostPath:
+              path: /var/lib/alloy
+              type: DirectoryOrCreate
+
+    # ============================================================
+    # SERVICIO
+    # ============================================================
+
     service:
       enabled: true
       type: ClusterIP
