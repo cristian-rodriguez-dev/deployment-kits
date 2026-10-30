@@ -30,10 +30,6 @@ spec:
         dockercontainers: true
 
         extra:
-          - name: run-log
-            mountPath: /run/log
-            readOnly: true
-
           - name: alloy-storage
             mountPath: /var/lib/alloy
             readOnly: false
@@ -128,6 +124,7 @@ spec:
           }
 
           loki.source.journal "host" {
+            path          = "/var/log/journal"
             max_age       = "12h"
             relabel_rules = loki.relabel.host_journal.rules
 
@@ -201,11 +198,6 @@ spec:
 
       volumes:
         extra:
-          - name: run-log
-            hostPath:
-              path: /run/log
-              type: Directory
-
           - name: alloy-storage
             hostPath:
               path: /var/lib/alloy
