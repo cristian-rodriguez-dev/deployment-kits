@@ -152,6 +152,67 @@
       loop:
         - "{{ var_prometheus_kubernetes_credentials_dir }}/kubelet.token"
         - "{{ var_prometheus_kubernetes_credentials_dir }}/k3s-ca.crt"
+    
+        # ============================================================
+    # LOKI
+    # ============================================================
+
+    - name: Desplegar manifiesto HelmChart de Loki
+      ansible.builtin.template:
+        src: ../templates/loki/loki.yaml.j2
+        dest: "{{ var_k3s_manifests_dir }}/loki.yaml"
+        owner: root
+        group: root
+        mode: "0600"
+      when: var_loki_enabled | bool
+      register: var_loki_manifest
+
+    - name: Esperar a que K3s registre Loki
+      ansible.builtin.command:
+        cmd: kubectl get helmchart loki -n kube-system
+      register: var_loki_helmchart
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: var_loki_helmchart.rc == 0
+      when: var_loki_enabled | bool
+
+    - name: Esperar a que los pods de Loki estén preparados
+      ansible.builtin.command:
+        cmd: >
+          kubectl wait
+          --for=condition=Ready
+          pod
+          -l app.kubernetes.io/name=loki
+          -n {{ var_loki_namespace }}
+          --timeout=300s
+      changed_when: false
+      when: var_loki_enabled | bool
+
+    - name: Obtener pods de Loki
+      ansible.builtin.command:
+        cmd: kubectl get pods -n {{ var_loki_namespace }} -o wide
+      register: var_loki_pods
+      changed_when: false
+      when: var_loki_enabled | bool
+
+    - name: Mostrar pods de Loki
+      ansible.builtin.debug:
+        var: var_loki_pods.stdout_lines
+      when: var_loki_enabled | bool
+
+    - name: Obtener servicios de Loki
+      ansible.builtin.command:
+        cmd: kubectl get svc -n {{ var_loki_namespace }}
+      register: var_loki_services
+      changed_when: false
+      when: var_loki_enabled | bool
+
+    - name: Mostrar servicios de Loki
+      ansible.builtin.debug:
+        var: var_loki_services.stdout_lines
+      when: var_loki_enabled | bool
+      
     # ============================================================
     # VERIFICACIONES
     # ============================================================

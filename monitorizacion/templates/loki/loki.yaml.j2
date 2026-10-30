@@ -1,0 +1,167 @@
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+
+metadata:
+  name: loki
+  namespace: kube-system
+
+spec:
+  repo: https://grafana-community.github.io/helm-charts
+  chart: loki
+  version: {{ var_loki_chart_version | to_json }}
+
+  targetNamespace: {{ var_loki_namespace | to_json }}
+  createNamespace: true
+  failurePolicy: retry
+
+  valuesContent: |-
+    # ============================================================
+    # DEPLOYMENT MODE
+    # ============================================================
+
+    deploymentMode: Monolithic
+
+    # ============================================================
+    # LOKI
+    # ============================================================
+
+    loki:
+      auth_enabled: false
+
+      commonConfig:
+        replication_factor: 1
+
+      schemaConfig:
+        configs:
+          - from: "2024-04-01"
+            store: tsdb
+            object_store: filesystem
+            schema: v13
+            index:
+              prefix: loki_index_
+              period: 24h
+
+      storage:
+        type: filesystem
+
+      limits_config:
+        allow_structured_metadata: true
+        volume_enabled: true
+        retention_period: {{ var_loki_retention | to_json }}
+
+      compactor:
+        retention_enabled: true
+        delete_request_store: filesystem
+
+    # ============================================================
+    # MONOLITHIC LOKI
+    # ============================================================
+
+    singleBinary:
+      replicas: 1
+
+      persistence:
+        enabled: true
+        storageClass: local-path
+        accessModes:
+          - ReadWriteOnce
+        size: {{ var_loki_storage_size | to_json }}
+        enableStatefulSetAutoDeletePVC: false
+
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+
+      sidecar: false
+
+      podDisruptionBudget:
+        enabled: false
+
+    # ============================================================
+    # DISABLE OTHER DEPLOYMENT MODES
+    # ============================================================
+
+    backend:
+      replicas: 0
+
+    read:
+      replicas: 0
+
+    write:
+      replicas: 0
+
+    ingester:
+      replicas: 0
+
+    querier:
+      replicas: 0
+
+    queryFrontend:
+      replicas: 0
+
+    queryScheduler:
+      replicas: 0
+
+    distributor:
+      replicas: 0
+
+    compactor:
+      replicas: 0
+
+    indexGateway:
+      replicas: 0
+
+    bloomPlanner:
+      replicas: 0
+
+    bloomBuilder:
+      replicas: 0
+
+    bloomGateway:
+      replicas: 0
+
+    # ============================================================
+    # MINIMIZE RESOURCE USAGE
+    # ============================================================
+
+    chunksCache:
+      enabled: false
+
+    resultsCache:
+      enabled: false
+
+    lokiCanary:
+      enabled: false
+
+    test:
+      enabled: false
+
+    minio:
+      enabled: false
+
+    # ============================================================
+    # GATEWAY
+    # Allows Grafana Docker / future Alloy to reach Loki
+    # ============================================================
+
+    gateway:
+      enabled: true
+      replicas: 1
+
+      service:
+        type: NodePort
+        port: 80
+        nodePort: {{ var_loki_nodeport }}
+
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
