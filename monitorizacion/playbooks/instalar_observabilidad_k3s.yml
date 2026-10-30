@@ -71,6 +71,52 @@
       changed_when: false
       when: var_kube_state_metrics_enabled | bool
 
+    - name: Desplegar acceso de Prometheus a métricas del kubelet
+      ansible.builtin.template:
+        src: ../templates/kubelet/prometheus-kubelet-access.yaml.j2
+        dest: "{{ var_k3s_manifests_dir }}/prometheus-kubelet-access.yaml"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Esperar a que Kubernetes genere el token de Prometheus
+      ansible.builtin.shell: |
+        kubectl get secret prometheus-kubelet-token \
+          -n monitoring \
+          -o jsonpath='{.data.token}' | base64 -d
+      register: var_prometheus_kubelet_token
+      changed_when: false
+      no_log: true
+      retries: 20
+      delay: 3
+      until: var_prometheus_kubelet_token.stdout | length > 0
+
+    - name: Crear directorio para credenciales Kubernetes de Prometheus
+      ansible.builtin.file:
+        path: /etc/prometheus/kubernetes
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Guardar token kubelet para Prometheus
+      ansible.builtin.copy:
+        content: "{{ var_prometheus_kubelet_token.stdout }}"
+        dest: /etc/prometheus/kubernetes/kubelet.token
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Copiar CA de K3s para Prometheus
+      ansible.builtin.copy:
+        src: /var/lib/rancher/k3s/server/tls/server-ca.crt
+        dest: /etc/prometheus/kubernetes/k3s-ca.crt
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
     - name: Mostrar resultado del despliegue
       ansible.builtin.debug:
         var: var_ksm_service.stdout_lines
