@@ -31,9 +31,13 @@ spec:
 
       mounts:
         varlog: true
-        dockercontainers: true
+        dockercontainers: false
 
         extra:
+          - name: docker-sock
+            mountPath: /var/run/docker.sock
+            readOnly: true
+
           - name: alloy-storage
             mountPath: /var/lib/alloy
             readOnly: false
@@ -141,31 +145,69 @@ spec:
           }
 
           // ======================================================
-          // LOGS DOCKER
+          // DOCKER
           // ======================================================
 
-          loki.source.file "docker" {
-            targets = [
-              {
-                __path__ = "/var/lib/docker/containers/*/*-json.log",
-                source   = "docker",
-                host     = {{ var_prometheus_local_name | to_json }},
-              },
-            ]
+          discovery.docker "local" {
+            host = "unix:///var/run/docker.sock"
+          }
 
-            forward_to = [loki.process.docker.receiver]
+          discovery.relabel "docker_logs" {
+            targets = []
 
-            tail_from_end            = true
-            on_positions_file_error  = "restart_from_end"
+            // Nombre real del contenedor
+            rule {
+              source_labels = ["__meta_docker_container_name"]
+              regex         = "/(.*)"
+              target_label  = "container_name"
+              replacement   = "$1"
+            }
 
-            file_match {
-              enabled     = true
-              sync_period = "10s"
+            // Nombre por defecto del servicio
+            rule {
+              source_labels = ["__meta_docker_container_name"]
+              regex         = "/(.*)"
+              target_label  = "service_name"
+              replacement   = "$1"
+            }
+
+            // Servicio de Docker Compose
+            rule {
+              source_labels = [
+                "__meta_docker_container_label_com_docker_compose_service",
+              ]
+              target_label = "compose_service"
+            }
+
+            // Proyecto de Docker Compose
+            rule {
+              source_labels = [
+                "__meta_docker_container_label_com_docker_compose_project",
+              ]
+              target_label = "compose_project"
+            }
+
+            // Rename de compose_service a service_name
+            rule {
+              source_labels = [
+                "__meta_docker_container_label_com_docker_compose_service",
+              ]
+              regex        = "(.+)"
+              target_label = "service_name"
+              replacement  = "$1"
             }
           }
 
-          loki.process "docker" {
-            stage.docker {}
+          loki.source.docker "local" {
+            host    = "unix:///var/run/docker.sock"
+            targets = discovery.docker.local.targets
+
+            labels = {
+              source = "docker",
+              host   = {{ var_prometheus_local_name | to_json }},
+            }
+
+            relabel_rules = discovery.relabel.docker_logs.rules
 
             forward_to = [loki.write.local.receiver]
           }
@@ -202,6 +244,11 @@ spec:
 
       volumes:
         extra:
+          - name: docker-sock
+            hostPath:
+              path: /var/run/docker.sock
+              type: Socket
+
           - name: alloy-storage
             hostPath:
               path: /var/lib/alloy
