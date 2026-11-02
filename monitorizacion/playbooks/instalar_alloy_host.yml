@@ -1,0 +1,204 @@
+---
+- name: Instalar y configurar Grafana Alloy en el host
+  hosts: prometheus-servers
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    # ============================================================
+    # REPOSITORIO OFICIAL GRAFANA
+    # ============================================================
+
+    - name: Instalar dependencias para el repositorio de Grafana
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - gnupg
+          - wget
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: var_alloy_host_enabled | bool
+
+    - name: Crear directorio para claves APT
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: var_alloy_host_enabled | bool
+
+    - name: Descargar clave GPG oficial de Grafana
+      ansible.builtin.get_url:
+        url: https://apt.grafana.com/gpg-full.key
+        dest: /etc/apt/keyrings/grafana.asc
+        owner: root
+        group: root
+        mode: "0644"
+      when: var_alloy_host_enabled | bool
+
+    - name: Añadir repositorio oficial de Grafana
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by=/etc/apt/keyrings/grafana.asc]
+          https://apt.grafana.com stable main
+        filename: grafana
+        state: present
+        update_cache: true
+      when: var_alloy_host_enabled | bool
+
+    # ============================================================
+    # ALLOY
+    # ============================================================
+
+    - name: Instalar Grafana Alloy
+      ansible.builtin.apt:
+        name: alloy
+        state: present
+        update_cache: true
+      when: var_alloy_host_enabled | bool
+
+    # ============================================================
+    # PERMISOS JOURNALD
+    # ============================================================
+
+    - name: Permitir a Alloy leer el journal del sistema
+      ansible.builtin.user:
+        name: alloy
+        groups:
+          - adm
+          - systemd-journal
+        append: true
+      notify: Reiniciar Alloy
+      when: var_alloy_host_enabled | bool
+
+    # ============================================================
+    # PERMISOS DE PRODUCCIÓN
+    # ============================================================
+
+    - name: Proteger directorio de configuración de Alloy
+      ansible.builtin.file:
+        path: /etc/alloy
+        state: directory
+        owner: root
+        group: alloy
+        mode: "0750"
+      when: var_alloy_host_enabled | bool
+
+    - name: Proteger directorio de datos de Alloy
+      ansible.builtin.file:
+        path: /var/lib/alloy
+        state: directory
+        owner: alloy
+        group: alloy
+        mode: "0750"
+      when: var_alloy_host_enabled | bool
+
+    # ============================================================
+    # CONFIGURACIÓN
+    # ============================================================
+
+    - name: Generar y validar configuración de Alloy Host
+      ansible.builtin.template:
+        src: ../templates/alloy_host/config.alloy.j2
+        dest: /etc/alloy/config.alloy
+        owner: root
+        group: alloy
+        mode: "0640"
+        backup: true
+        validate: "alloy validate %s"
+      notify: Reiniciar Alloy
+      when: var_alloy_host_enabled | bool
+
+    # ============================================================
+    # HARDENING SYSTEMD
+    # ============================================================
+
+    - name: Crear directorio systemd drop-in para Alloy
+      ansible.builtin.file:
+        path: /etc/systemd/system/alloy.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: var_alloy_host_enabled | bool
+
+    - name: Endurecer servicio Alloy
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/alloy.service.d/hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Service]
+
+          User=alloy
+          Group=alloy
+
+          NoNewPrivileges=true
+
+          ProtectSystem=strict
+          ProtectHome=true
+
+          ProtectKernelTunables=true
+          ProtectKernelModules=true
+          ProtectControlGroups=true
+
+          RestrictSUIDSGID=true
+          LockPersonality=true
+          PrivateTmp=true
+
+          ReadOnlyPaths=/var/log/journal
+          ReadOnlyPaths=/run/log/journal
+
+          ReadWritePaths=/var/lib/alloy
+      register: var_alloy_hardening
+      when: var_alloy_host_enabled | bool
+
+    - name: Recargar systemd después del hardening
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when:
+        - var_alloy_host_enabled | bool
+        - var_alloy_hardening.changed
+
+    # ============================================================
+    # SERVICIO
+    # ============================================================
+
+    - name: Habilitar y arrancar Alloy
+      ansible.builtin.systemd:
+        name: alloy
+        enabled: true
+        state: started
+      when: var_alloy_host_enabled | bool
+
+    - name: Aplicar handlers pendientes
+      ansible.builtin.meta: flush_handlers
+
+    # ============================================================
+    # VALIDACIÓN
+    # ============================================================
+
+    - name: Comprobar estado de Alloy
+      ansible.builtin.command:
+        cmd: systemctl is-active alloy
+      register: var_alloy_host_status
+      changed_when: false
+      failed_when: var_alloy_host_status.stdout != "active"
+      when: var_alloy_host_enabled | bool
+
+    - name: Mostrar estado de Alloy
+      ansible.builtin.debug:
+        msg: "Grafana Alloy Host: {{ var_alloy_host_status.stdout }}"
+      when: var_alloy_host_enabled | bool
+
+  handlers:
+
+    - name: Reiniciar Alloy
+      ansible.builtin.systemd:
+        name: alloy
+        state: restarted
+        daemon_reload: true
