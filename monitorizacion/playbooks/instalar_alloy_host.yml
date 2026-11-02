@@ -96,6 +96,15 @@
         mode: "0750"
       when: var_alloy_host_enabled | bool
 
+    - name: Corregir propietario del almacenamiento de Alloy
+      ansible.builtin.file:
+        path: /var/lib/alloy
+        state: directory
+        owner: alloy
+        group: alloy
+        recurse: true
+      when: var_alloy_host_enabled | bool
+          
     # ============================================================
     # CONFIGURACIÓN
     # ============================================================
