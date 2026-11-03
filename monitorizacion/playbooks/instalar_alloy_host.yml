@@ -104,7 +104,7 @@
         group: alloy
         recurse: true
       when: var_alloy_host_enabled | bool
-          
+
     # ============================================================
     # CONFIGURACIÓN
     # ============================================================
@@ -119,6 +119,21 @@
         backup: true
         validate: "alloy validate %s"
       notify: Reiniciar Alloy
+      when: var_alloy_host_enabled | bool
+
+    - name: Comprobar que la configuración de Alloy no está vacía
+      ansible.builtin.stat:
+        path: /etc/alloy/config.alloy
+      register: var_alloy_config_file
+      when: var_alloy_host_enabled | bool
+
+    - name: Validar tamaño de la configuración de Alloy
+      ansible.builtin.assert:
+        that:
+          - var_alloy_config_file.stat.exists
+          - var_alloy_config_file.stat.size > 100
+        fail_msg: "La configuración /etc/alloy/config.alloy está vacía o incompleta."
+        success_msg: "La configuración de Alloy se ha generado correctamente."
       when: var_alloy_host_enabled | bool
 
     # ============================================================
@@ -145,7 +160,8 @@
 
           User=alloy
           Group=alloy
-
+          SupplementaryGroups=adm systemd-journal
+          
           NoNewPrivileges=true
 
           ProtectSystem=strict

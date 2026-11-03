@@ -1,0 +1,121 @@
+// ============================================================
+// GRAFANA ALLOY - HOST
+// ============================================================
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// ============================================================
+// JOURNAL RELABELING
+// ============================================================
+
+loki.relabel "host_journal" {
+  forward_to = []
+
+  // Unidad systemd.
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+
+  // Prioridad journald.
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "priority"
+  }
+
+  // Identificador syslog.
+  rule {
+    source_labels = ["__journal_syslog_identifier"]
+    target_label  = "syslog_identifier"
+  }
+
+  // Host original del journal.
+  rule {
+    source_labels = ["__journal__hostname"]
+    target_label  = "journal_hostname"
+  }
+
+  // Unidad systemd como servicio.
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    regex         = "(.+)"
+    target_label  = "service_name"
+    replacement   = "$1"
+  }
+
+  // ==========================================================
+  // METADATOS DOCKER
+  // ==========================================================
+
+  rule {
+    source_labels = ["__journal_container_name"]
+    regex         = "(.+)"
+    target_label  = "container_name"
+    replacement   = "$1"
+  }
+
+  rule {
+    source_labels = ["__journal_container_name"]
+    regex         = "(.+)"
+    target_label  = "service_name"
+    replacement   = "$1"
+  }
+
+  rule {
+    source_labels = ["__journal_container_id"]
+    regex         = "(.+)"
+    target_label  = "container_id"
+    replacement   = "$1"
+  }
+
+  rule {
+    source_labels = ["__journal_image_name"]
+    regex         = "(.+)"
+    target_label  = "image_name"
+    replacement   = "$1"
+  }
+
+  rule {
+    source_labels = ["__journal_container_name"]
+    regex         = "(.+)"
+    target_label  = "source"
+    replacement   = "docker"
+  }
+}
+
+// ============================================================
+// JOURNALD
+// ============================================================
+
+loki.source.journal "host" {
+  path    = "/var/log/journal"
+  max_age = "12h"
+
+  relabel_rules = loki.relabel.host_journal.rules
+
+  labels = {
+    source      = "journal",
+    collector   = "alloy-host",
+    host        = {{ var_alloy_host_name | to_json }},
+    environment = {{ var_observability_environment | to_json }},
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+// ============================================================
+// LOKI
+// ============================================================
+
+loki.write "local" {
+  external_labels = {
+    cluster = {{ var_alloy_cluster_name | to_json }},
+  }
+
+  endpoint {
+    url = {{ var_alloy_host_loki_url | to_json }}
+  }
+}
