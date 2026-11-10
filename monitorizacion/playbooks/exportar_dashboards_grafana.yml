@@ -1,0 +1,237 @@
+---
+- name: Exportar los dashboards de Grafana desde AWX sin modificarlos
+  hosts: grafana-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_grafana_admin_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+    var_grafana_local_url: "http://127.0.0.1:{{ var_grafana_port }}"
+    var_grafana_export_api_v2: "{{ var_grafana_local_url }}/apis/dashboard.grafana.app/v2/namespaces/default/dashboards"
+    var_grafana_export_default_root: "{{ var_grafana_install_dir }}/backups/dashboard-exports"
+
+  pre_tasks:
+    - name: Detectar variables ausentes sin exponer contraseñas
+      ansible.builtin.set_fact:
+        var_grafana_export_missing: >-
+          {{
+            (['var_grafana_install_dir'] if var_grafana_install_dir is not defined else [])
+            + (['var_grafana_port'] if var_grafana_port is not defined else [])
+            + (['var_grafana_admin_user'] if var_grafana_admin_user is not defined else [])
+            + (['VAR_GRAFANA_ADMIN_PASSWORD (credencial AWX)']
+               if (lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') | length == 0)
+               else [])
+          }}
+      changed_when: false
+
+    - name: Validar configuración requerida y ejecución real
+      ansible.builtin.assert:
+        that:
+          - var_grafana_export_missing | length == 0
+          - not ansible_check_mode
+        fail_msg: >-
+          Faltan variables en AWX: {{ var_grafana_export_missing | join(', ') }}.
+          Este Job genera un archivo local en el servidor y no admite --check.
+          Adjunta las mismas credenciales que al Job Template 10.
+
+    - name: Fijar parámetros por defecto modificables desde el inventario AWX
+      ansible.builtin.set_fact:
+        var_grafana_export_root_effective: "{{ var_grafana_export_root | default(var_grafana_export_default_root) }}"
+        var_grafana_export_count_effective: "{{ var_grafana_export_expected_count | default(15) | int }}"
+      changed_when: false
+
+    - name: Validar rutas, puerto y cantidad esperada
+      ansible.builtin.assert:
+        that:
+          - var_grafana_install_dir is match('^/[^\n]+$')
+          - var_grafana_install_dir != '/'
+          - var_grafana_export_root_effective is match('^/[^\n]+$')
+          - var_grafana_export_root_effective != '/'
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - (var_grafana_port | int) >= 1
+          - (var_grafana_port | int) <= 65535
+          - (var_grafana_admin_user | string | trim | length) > 0
+          - (var_grafana_export_count_effective | int) >= 1
+          - (var_grafana_export_count_effective | int) <= 5000
+        fail_msg: Valores inválidos para exportación. No se ha escrito nada en Grafana.
+
+  tasks:
+    - name: Verificar disponibilidad de la API de Grafana
+      ansible.builtin.uri:
+        url: "{{ var_grafana_local_url }}/api/health"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: var_grafana_export_health
+      changed_when: false
+
+    - name: Comprobar que la base de datos de Grafana está saludable
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_export_health.json | default({})).get('database', '') == 'ok'
+        fail_msg: Grafana no indica database=ok; detener sin exportar.
+
+    - name: Consultar todos los dashboards visibles para la cuenta de AWX
+      ansible.builtin.uri:
+        url: "{{ var_grafana_local_url }}/api/search?type=dash-db&limit=5000"
+        method: GET
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ var_grafana_admin_password }}"
+        force_basic_auth: true
+        status_code: 200
+        return_content: true
+      register: var_grafana_export_search
+      changed_when: false
+      no_log: true
+      diff: false
+
+    - name: Construir inventario de los dashboards detectados
+      ansible.builtin.set_fact:
+        var_grafana_export_inventory: "{{ var_grafana_export_search.json | default([]) }}"
+      changed_when: false
+      no_log: true
+
+    - name: Verificar que no faltan dashboards antes de crear el archivo
+      ansible.builtin.assert:
+        that:
+          - var_grafana_export_inventory is sequence
+          - var_grafana_export_inventory | length == (var_grafana_export_count_effective | int)
+          - (var_grafana_export_inventory | map(attribute='uid') | list | unique | length) == (var_grafana_export_inventory | length)
+        fail_msg: >-
+          Grafana no devuelve exactamente {{ var_grafana_export_count_effective }} dashboards únicos.
+          Detener para evitar un backup incompleto. Revisa permisos, organización y cambios.
+
+    - name: Validar UID y título de cada dashboard (evitar rutas inseguras)
+      ansible.builtin.assert:
+        that:
+          - item.uid is match('^[A-Za-z0-9._-]{1,128}$')
+          - item.title is string
+          - item.title | length > 0
+        fail_msg: "Dashboard con UID o título inválido: {{ item.get('uid', '<sin uid>') }}"
+      loop: "{{ var_grafana_export_inventory }}"
+      loop_control:
+        label: "{{ item.get('uid', 'sin uid') }}"
+
+    - name: Fijar identificador único para este snapshot
+      ansible.builtin.set_fact:
+        var_grafana_export_run_id: >-
+          {{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}-{{ lookup('ansible.builtin.password', '/dev/null chars=ascii_lowercase,digits length=6') }}
+        var_grafana_export_records: []
+      changed_when: false
+
+    - name: Calcular rutas persistentes de esta ejecución
+      ansible.builtin.set_fact:
+        var_grafana_export_stage: "{{ var_grafana_export_root_effective }}/.stage-{{ var_grafana_export_run_id }}"
+        var_grafana_export_zip: "{{ var_grafana_export_root_effective }}/grafana-dashboards-{{ var_grafana_export_run_id }}.zip"
+      changed_when: false
+
+    - name: Crear directorio persistente privado para exportaciones
+      ansible.builtin.file:
+        path: "{{ var_grafana_export_root_effective }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Verificar que no existe una exportación previa con el mismo identificador
+      ansible.builtin.stat:
+        path: "{{ var_grafana_export_zip }}"
+      register: var_grafana_export_zip_before
+      changed_when: false
+
+    - name: Rechazar sobrescritura de una exportación anterior
+      ansible.builtin.assert:
+        that:
+          - not var_grafana_export_zip_before.stat.exists
+        fail_msg: Se encontró un ZIP con el mismo nombre. No se sobrescribirán copias previas.
+
+    - name: Preparar subdirectorios privados del snapshot
+      ansible.builtin.file:
+        path: "{{ var_grafana_export_stage }}/dashboards/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop:
+        - v2
+        - v1
+        - legacy
+
+    - name: Obtener cada dashboard (V2 o fallback clásico)
+      ansible.builtin.include_tasks: ../tasks/grafana/exportar_dashboard.yml
+      loop: "{{ var_grafana_export_inventory }}"
+      loop_control:
+        loop_var: var_grafana_export_item
+        label: "{{ var_grafana_export_item.uid }}"
+
+    - name: Comprobar que se han exportado todos los dashboards
+      ansible.builtin.assert:
+        that:
+          - var_grafana_export_records | length == var_grafana_export_count_effective | int
+          - (var_grafana_export_records | map(attribute='uid') | list | unique | length) == (var_grafana_export_count_effective | int)
+        fail_msg: No se exportaron los 15 dashboards; el ZIP no se creará.
+
+    - name: Escribir manifiesto privado con la lista de archivos
+      ansible.builtin.copy:
+        dest: "{{ var_grafana_export_stage }}/manifest.json"
+        content: >-
+          {{ {
+              'schema': 1,
+              'source': 'Grafana API (lectura)',
+              'created_utc': var_grafana_export_run_id,
+              'expected_count': (var_grafana_export_count_effective | int),
+              'dashboards': var_grafana_export_records
+            } | to_nice_json(indent=2, ensure_ascii=False) }}
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      diff: false
+
+    - name: Copiar empaquetador seguro incluido en Git
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/grafana_export_bundle.py"
+        dest: "{{ var_grafana_export_stage }}/bundle.py"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Crear ZIP completo verificando cantidad, formato y checksums
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ var_grafana_export_stage }}/bundle.py"
+          - "{{ var_grafana_export_stage }}"
+          - "{{ var_grafana_export_zip }}"
+      register: var_grafana_export_bundle_out
+      changed_when: true
+
+    - name: Comprobar existencia y SHA256 del ZIP final
+      ansible.builtin.stat:
+        path: "{{ var_grafana_export_zip }}"
+        checksum_algorithm: sha256
+      register: var_grafana_export_final_stat
+      changed_when: false
+
+    - name: Confirmar que el ZIP se ha creado de forma segura
+      ansible.builtin.assert:
+        that:
+          - var_grafana_export_final_stat.stat.exists
+          - var_grafana_export_final_stat.stat.isreg
+          - var_grafana_export_final_stat.stat.size > 0
+          - var_grafana_export_final_stat.stat.mode == '0600'
+        fail_msg: Falló la creación segura del ZIP de dashboards.
+
+    - name: Eliminar únicamente el directorio temporal de esta ejecución
+      ansible.builtin.file:
+        path: "{{ var_grafana_export_stage }}"
+        state: absent
+
+    - name: Mostrar resultado sin exponer contenidos de dashboards ni credenciales
+      ansible.builtin.debug:
+        msg:
+          - "Exportación completada: {{ var_grafana_export_count_effective }} dashboards."
+          - "V2: {{ var_grafana_export_records | selectattr('format', 'equalto', 'v2') | list | length }}; V1: {{ var_grafana_export_records | selectattr('format', 'equalto', 'v1') | list | length }}; clásicos: {{ var_grafana_export_records | selectattr('format', 'equalto', 'legacy') | list | length }}."
+          - "ZIP en el servidor: {{ var_grafana_export_zip }}"
+          - "SHA256: {{ var_grafana_export_final_stat.stat.checksum }}"
+          - "No se modificó ningún dashboard, datasource ni contenedor de Grafana."

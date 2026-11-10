@@ -1,0 +1,102 @@
+---
+- name: Consultar API de Grafana sin exponer credenciales
+  block:
+    - name: Consultar dashboard con API Grafana V2
+      ansible.builtin.uri:
+        url: "{{ var_grafana_export_api_v2 }}/{{ var_grafana_export_item.uid | urlencode }}"
+        method: GET
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ var_grafana_admin_password }}"
+        force_basic_auth: true
+        status_code: [200, 404]
+        return_content: true
+      register: var_grafana_export_v2_result
+      changed_when: false
+      no_log: true
+      diff: false
+    
+    - name: Consultar API clásica solo si V2 no encuentra el dashboard
+      ansible.builtin.uri:
+        url: "{{ var_grafana_local_url }}/api/dashboards/uid/{{ var_grafana_export_item.uid | urlencode }}"
+        method: GET
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ var_grafana_admin_password }}"
+        force_basic_auth: true
+        status_code: 200
+        return_content: true
+      register: var_grafana_export_legacy_result
+      when: var_grafana_export_v2_result.status == 404
+      changed_when: false
+      no_log: true
+      diff: false
+  rescue:
+    - name: Informar de fallo de consulta HTTP sin credenciales
+      ansible.builtin.fail:
+        msg: >-
+          No se pudo obtener el dashboard {{ var_grafana_export_item.uid }} con la API V2
+          ni con su alternativa clásica. Revisar permisos, URL y UID. Se aborta la exportación.
+
+- name: Identificar formato y validar respuesta sin publicar el JSON
+  ansible.builtin.set_fact:
+    var_grafana_export_format: >-
+      {{
+        'legacy' if var_grafana_export_v2_result.status == 404 else
+        'v2' if var_grafana_export_v2_result.json.get('apiVersion', '') == 'dashboard.grafana.app/v2' else
+        'v1' if var_grafana_export_v2_result.json.get('apiVersion', '') == 'dashboard.grafana.app/v1' else
+        'invalid'
+      }}
+    var_grafana_export_payload: >-
+      {{
+        var_grafana_export_legacy_result.json
+        if var_grafana_export_v2_result.status == 404
+        else var_grafana_export_v2_result.json
+      }}
+  changed_when: false
+  no_log: true
+
+- name: Validar formato de respuesta V2/V1 o clásica según corresponda
+  ansible.builtin.set_fact:
+    var_grafana_export_valid: >-
+      {{
+        (var_grafana_export_payload.get('kind', '') == 'Dashboard'
+         and var_grafana_export_payload.get('metadata', {}).get('name', '') == var_grafana_export_item.uid
+         and var_grafana_export_payload.get('spec', {}).get('title', '') == var_grafana_export_item.title)
+        if var_grafana_export_format in ['v2', 'v1'] else
+        (var_grafana_export_payload.get('dashboard', {}).get('uid', '') == var_grafana_export_item.uid
+         and var_grafana_export_payload.get('dashboard', {}).get('title', '') == var_grafana_export_item.title)
+        if var_grafana_export_format == 'legacy' else false
+      }}
+  changed_when: false
+  no_log: true
+
+- name: Detener ante un dashboard incompleto o distinto del inventariado
+  ansible.builtin.assert:
+    that:
+      - var_grafana_export_valid | bool
+    fail_msg: >-
+      Falló la exportación del UID {{ var_grafana_export_item.uid }}:
+      la respuesta de Grafana no coincide con el inventario o el formato no está soportado.
+
+- name: Guardar copia privada fiel de la respuesta de Grafana
+  ansible.builtin.copy:
+    dest: "{{ var_grafana_export_stage }}/dashboards/{{ var_grafana_export_format }}/{{ var_grafana_export_item.uid }}.json"
+    content: "{{ var_grafana_export_payload | to_nice_json(indent=2, ensure_ascii=False) }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  diff: false
+
+- name: Registrar el dashboard para el manifiesto de exportación
+  ansible.builtin.set_fact:
+    var_grafana_export_records: >-
+      {{ var_grafana_export_records + [
+        {
+          'uid': var_grafana_export_item.uid,
+          'title': var_grafana_export_item.title,
+          'format': var_grafana_export_format,
+          'path': 'dashboards/' ~ var_grafana_export_format ~ '/' ~ var_grafana_export_item.uid ~ '.json'
+        }
+      ] }}
+  changed_when: false
+  no_log: true

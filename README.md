@@ -1,60 +1,93 @@
-# Bloque 01 v2 — Corrección de auditoría Grafana AWX y exportaciones verificadas
+# Bloque 01 · Fase 3 — Exportación segura de los 15 dashboards Grafana (AWX)
 
-## Diagnóstico del error aportado (10-11-2026)
+**Fecha:** 10-11-2026. **Proyecto:** `deployment-kits` (laboratorio antiguo), NO `infrastructure-platform`.
 
-El Job Template se detuvo en `Comprobar variables de Grafana en AWX`, **antes** de ejecutar cualquier llamada HTTP. El `no_log: true` del `assert` antiguo censuró cuál de los requisitos falló. No implica que se haya eliminado o modificado un dashboard.
+## Resultado previo validado
 
-El nuevo `auditar_grafana.yml` diferencia errores en variables, formato del puerto, disponibilidad de Grafana y autenticación. **Solo muestra nombres de variables ausentes, jamás contraseñas**. Evita `become` porque consulta la API local mediante GET sin necesidad de sudo.
+- Job Template `10 - Auditar Grafana`: `ok=6 changed=0 failed=0`; 15 dashboards, 5 datasources; Grafana DB `ok`.
+- Job Template `11 - Gestionar Dashboards`: `ok=41 changed=0 failed=0`; los 7 dashboards V2 exportados a Git coinciden exactamente (`SIN CAMBIOS`).
+- **Este paquete es aditivo:** NO sustituye los playbooks 10 y 11 ni los JSON existentes.
 
-`SSH password` y `BECOME password` son solicitudes de credenciales de la plantilla AWX; no indican una ejecución fallida. El aviso `ANSIBLE_COLLECTIONS_PATHS` y los guiones de nombres de grupos no son la causa de este error.
+## Qué hace / qué NO hace
 
-## Qué incluye
+El Job Template `12 - Exportar Dashboards Grafana` consulta por GET la API de Grafana, comprueba que devuelve **exactamente 15 dashboards con UID único**, los descarga por API V2 y usa `/api/dashboards/uid/<uid>` como alternativa si el recurso no existe en la API V2. Conserva los formatos **V2, V1 y clásico** sin convertirlos. Si hay un dashboard inaccesible o inconsistente, detiene el paquete en lugar de declarar un backup completo.
 
-- `monitorizacion/playbooks/auditar_grafana.yml`: GET health/datasources/dashboard search (auditoría sin cambios).
-- `monitorizacion/playbooks/configurar_dashboards_grafana.yml`: comparación por API V2. **ESCRITURAS BLOQUEADAS en este paquete incluso si el operador establece `var_grafana_dashboards_apply: true`**.
-- `monitorizacion/tasks/grafana/*.yml`: helpers mantenidos como referencia; no se ejecuta la rama de escrituras en este paquete.
-- `monitorizacion/dashboards/*.json`: 7 exportaciones V2 originales, con 187 paneles, conservadas sin modificar sus contenidos.
-- `monitorizacion/examples/variables_dashboards_grafana.yml`: los dos switches permanecen en `false`.
-- `tests/test_contract.py`: contratos estáticos de YAML, modos, identificadores y número de paneles.
+Escribe UN ZIP con `manifest.json` (UID, título, formato, ruta, checksum SHA256 por JSON) y 15 JSON individuales. Usa un nombre único en un **directorio persistente del host `grafana-servers`**, permisos privados (`0700` directorio, `0600` ZIP), sin sustituir exportaciones anteriores. El staging privado de ESTA ejecución se borra solo tras completar el ZIP.
 
-## Grafana: exports incluidos
+**No modifica Grafana**: no ejecuta POST/PUT/DELETE, no reinicia servicios, no toca Docker Compose, datasource, paneles ni base de datos. **Sí escribe el ZIP y archivos temporales en el sistema de archivos del servidor**, por tanto el recap tendrá `changed` superior a cero. Esto es normal.
 
-| Título | UID | Paneles |
-|---|---|---:|
-| Fleet - Infrastructure Overview | `adnk6jm` | 25 |
-| Platform Overview | `adqmqdw` | 8 |
-| Host Detail | `adcfhnb` | 37 |
-| Security Overview | `adgsl8t` | 40 |
-| Traefik Overview | `ad4fsvl` | 22 |
-| Loki Overview | `adghvhn` | 21 |
-| K3s Overview | `adrxc42` | 34 |
-| **Total** | **7** | **187** |
+**No constituye una copia integral de Grafana**: faltan su DB, configuración, datasources, plugins, permisos, secretos, alertas e información de usuarios.
 
-Los JSON son fotografías de la configuración exportada: **pueden diferir de los dashboards vivos si han cambiado desde la exportación**. No habilites escritura basándote únicamente en estos archivos.
+## Archivos añadidos al repositorio antiguo
 
-## Instalación
+```text
+monitorizacion/
+├── playbooks/exportar_dashboards_grafana.yml
+├── tasks/grafana/exportar_dashboard.yml
+├── files/grafana_export_bundle.py
+└── examples/variables_exportacion_grafana.yml
 
-1. Descomprime las rutas `monitorizacion/...` sobre tu repo `deployment-kits` **sin reemplazar** `instalar_grafana.yml`, Compose, volumen o datasource.
-2. Commit, push y sincronización de proyecto en AWX.
-3. En el Job Template `10 - Auditar Grafana` selecciona playbook `monitorizacion/playbooks/auditar_grafana.yml`, inventario y credencial SSH de siempre. Revisa que esté vinculado al grupo `grafana-servers`.
-4. Verifica que `var_grafana_port` (ejemplo `3000`) y `var_grafana_admin_user` estén en las variables de grupo `grafana-servers` de AWX. Usa los **valores existentes**, sin recrear el grupo.
-5. Adjunta al **mismo Job Template** la credencial de AWX que expone la variable de entorno `VAR_GRAFANA_ADMIN_PASSWORD`. No es la contraseña SSH; si la credencial es `Custom Credential Type` debe inyectar ese nombre exacto. No añadas la contraseña a Git, extra vars ni capturas/logs.
-6. Ejecuta el Job Template 10. Ahora debería identificar la variable que falta, si la hay; si llega a HTTP 401/403, comprueba credencial/privilegios en lugar de reinstalar Grafana.
-7. Con resultado correcto, ejecuta `11 - Gestionar Dashboards Grafana` con `var_grafana_dashboards_apply: false`, para obtener `SIN CAMBIOS`, `CREAR` o `ACTUALIZAR` por UID. Si marca `CREAR` para todos, revisa conexión/org/UID antes de hacer nada más.
+tools/verificar_exportacion_grafana.py  # CLI en PC Windows/Linux, no se usa en AWX
+```
 
-## Garantía de seguridad de esta revisión
+## Configuración Job Template 12
 
-Las ejecuciones de ambos playbooks están limitadas a consultas de lectura. El `10` solo invoca GET. El `11` rechaza el modo `apply` **antes de cualquier tarea remota**. Ningún dashboard se crea, sustituye ni elimina; ningún contenedor se reinicia; ninguna base de datos o datasource se cambia.
+1. Copia **solo los archivos nuevos**, manteniendo las rutas del ZIP, sobre `deployment-kits`.
+2. Haz commit/push y sincroniza el proyecto de AWX.
+3. Crea Job Template `12 - Exportar Dashboards Grafana`: proyecto `deployment-kits`, playbook `monitorizacion/playbooks/exportar_dashboards_grafana.yml`, mismo inventario y credencial SSH/BECOME que el Job 11, grupo `grafana-servers`.
+4. Adjunta la credencial personalizada de Grafana que inyecta `VAR_GRAFANA_ADMIN_PASSWORD` (la misma que en 10 y 11). Se reutilizan `var_grafana_port`, `var_grafana_admin_user`, `var_grafana_install_dir` ya existentes en AWX. Nunca meter contraseñas en Extra Variables, código, ZIP adjuntos públicos o logs.
+5. El valor esperado es **15** por defecto. Si se añade/quita un dashboard, revisar primero el inventario y ajustar deliberadamente `var_grafana_export_expected_count` en las variables de AWX; no ignorar la comprobación.
+6. Lanza 12. Confirma `failed=0`, `unreachable=0`, `Exportación completada: 15 dashboards`; anota ruta ZIP y SHA256 impresos. No marcar como validado hasta que el ZIP esté descargado y el verificador confirme el contenido.
 
-La aplicación real de dashboards se habilitará en una entrega independiente, tras verificar las diferencias y disponer de copia de seguridad real de Grafana. No se ha probado conexión a tu entorno AWX ni la API de Grafana desde este entorno.
+**Requisitos en servidor:** Python 3 y `zipfile` estándar (Ubuntu incluye ambos), espacio disponible para ZIP + staging (aproximadamente el doble de los JSON exportados), usuario AWX con sudo para escribir los archivos root-only, red local hacia Grafana API.
 
-## Qué hacer si sigue fallando
+### Recuperar el ZIP en tu PC
 
-- Si aparece `Faltan en el Job Template o inventario AWX: ...`, añade únicamente las variables indicadas y vuelve a lanzar.
-- Si falla `/api/health`, verifica puerto y accesibilidad **desde el host `ansible_server`**.
-- Si health pasa pero falla una consulta autenticada, verifica usuario/contraseña actual y permisos de lectura.
-- Si el paso 11 no reconoce `/apis/dashboard.grafana.app/v2/`, conserva el modo solo lectura y revisa compatibilidad de versión/API antes de cambios.
+AWX usa un entorno efímero (`/runner`); por eso el ZIP **no está en AWX**, sino en el servidor de Grafana, cuya ruta exacta aparece en el último `debug` (por defecto `{{ var_grafana_install_dir }}/backups/dashboard-exports/...zip`).
 
-## Compatibilidad y alcance
+1. Entra por SSH al servidor de Grafana con el usuario habitual.
+2. Copia la ruta EXACTA del ZIP que muestra AWX a tu directorio personal, creando una copia privada accesible por SSH (sustituye los marcadores):
 
-Respeta `monitorizacion/...`, grupo `grafana-servers`, variables `var_grafana_*` y el instalador vigente del proyecto antiguo. No toca `infrastructure-platform` ni crea nuevos inventarios. Si hay modificaciones respecto a las exportaciones, se comunicarán en la auditoría, no se aplicarán automáticamente. Mantén este README junto al bloque en Git.
+```bash
+sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" \
+  '/ruta/impresa/por/AWX/grafana-dashboards-FECHA.zip' \
+  "$HOME/grafana-dashboards-export.zip"
+```
+
+3. Descarga con PowerShell desde tu PC, utilizando la dirección/usuario del laboratorio (ejemplo ilustrativo):
+
+```powershell
+scp usuario@IP_DEL_SERVIDOR:~/grafana-dashboards-export.zip "$HOME\Downloads\grafana-dashboards-export.zip"
+```
+
+4. En el directorio local del repositorio, comprueba el backup y compáralo con los siete JSON originales:
+
+```powershell
+python .\tools\verificar_exportacion_grafana.py "$HOME\Downloads\grafana-dashboards-export.zip" --repositorio .
+```
+
+Opcionalmente, extrae en una **carpeta nueva** fuera de `monitorizacion/dashboards`, para revisión manual:
+
+```powershell
+python .\tools\verificar_exportacion_grafana.py "$HOME\Downloads\grafana-dashboards-export.zip" --repositorio . --extraer "$HOME\Downloads\grafana-candidatos"
+```
+
+**Mantén el ZIP y la carpeta de candidatos fuera del repositorio Git** hasta completar la revisión de seguridad y decidir qué archivos versionar.
+
+Tras confirmar la copia en el PC, puedes borrar la copia de tu `HOME` del servidor; conserva el ZIP protegido en `backups/dashboard-exports` y verifica las políticas de retención/almacenamiento antes de cualquier limpieza.
+
+## Interpretación y próximos pasos
+
+- `15 dashboards` y `7 coincidencias`: exportación consistente respecto al Git anterior.
+- Los **8 restantes** estarán en `dashboards/v2`, `/v1` o `/legacy` según el formato de API recibido. Si son V2, revisaremos si deben incorporarse como JSON al directorio gestionado; V1/legacy requerirán un tratamiento explícito de compatibilidad, no renombrarlos a V2.
+- Los archivos exportados pueden contener rutas, URLs internas, consultas y otros datos sensibles. **No subir el ZIP ni su contenido a un repositorio público ni a tickets** antes de revisarlos; Git privado también requiere revisión de secretos.
+- La automatización actual de los 7 dashboards permanece en modo AUDITORÍA. El Job 12 no habilita escrituras ni modifica esas decisiones.
+- Tras validar la exportación: preparar backup de BD/configuración de Grafana, documentar restauración, después gestionar dashboards y datasources con rollback verificado.
+
+## Si falla
+
+- `Faltan variables`: añade a Job 12 el mismo conjunto usado por Jobs 10/11.
+- Cantidad distinta de 15: no se crea ZIP; revisar permisos/organización y repetir auditoría 10.
+- GET 401/403/404 no recuperable: revisar permisos y Dashboard UID; no crear backups incompletos.
+- `No space left on device`: detener, comprobar disco; no limpiar ni eliminar el almacenamiento de Grafana.
+- Si un error deja `.stage-*` o `.zip.partial`, **no borrar nada automáticamente fuera de la carpeta de esta ejecución**. Investigar y retirar manualmente solo los temporales de ese intento cuando estén identificados.

@@ -1,0 +1,13 @@
+---
+# Ajustes del Job Template 12 - Exportar Dashboards Grafana.
+# Si la auditoría anterior encontró 15 dashboards, conservar 15 como protección.
+var_grafana_export_expected_count: 15
+
+# VARIABLES HEREDADAS DE grafana-servers (no duplicar ni modificar las actuales):
+# var_grafana_port: 3000
+# var_grafana_admin_user: usuario_actual
+# var_grafana_install_dir: /ruta/actual/de/grafana
+# VAR_GRAFANA_ADMIN_PASSWORD: credencial AWX, nunca en Git ni Extra Variables
+
+# Exportación en directorio persistente del servidor (opcional):
+# var_grafana_export_root: /ruta/privada/para/exports
