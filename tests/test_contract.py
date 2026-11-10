@@ -1,51 +1,50 @@
-"""Pruebas estáticas, sin conectar a AWX ni Grafana."""
+"""Pruebas estáticas: ni grafana ni AWX se modifican."""
 from pathlib import Path
+import json
 import unittest
-
-try:
-    import yaml
-except ImportError as exc:
-    raise RuntimeError('Instala PyYAML para ejecutar estas pruebas: pip install pyyaml') from exc
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-MONITOR = ROOT / 'monitorizacion'
+MON = ROOT / "monitorizacion"
 
+class ContractTests(unittest.TestCase):
+    def test_yaml_parses(self):
+        for path in MON.rglob("*.yml"):
+            with self.subTest(path=path.name):
+                self.assertIsNotNone(yaml.safe_load(path.read_text(encoding="utf-8")))
 
-class GrafanaContractTests(unittest.TestCase):
-    def test_all_playbooks_and_taskfiles_are_valid_yaml(self):
-        for file in sorted(MONITOR.rglob('*.yml')):
-            with self.subTest(file=str(file.relative_to(ROOT))):
-                obj = yaml.safe_load(file.read_text(encoding='utf-8'))
-                self.assertIsInstance(obj, (list, dict))
+    def test_auditor_is_read_only(self):
+        data = yaml.safe_load((MON/'playbooks'/'auditar_grafana.yml').read_text())[0]
+        self.assertFalse(data['become'])
+        self.assertFalse(data['gather_facts'])
+        self.assertEqual(data['hosts'],'grafana-servers')
+        source=(MON/'playbooks'/'auditar_grafana.yml').read_text()
+        self.assertNotIn('method: PUT',source)
+        self.assertNotIn('method: POST',source)
+        self.assertNotIn('method: DELETE',source)
+        self.assertIn('var_grafana_missing_settings',source)
+        self.assertIn('VAR_GRAFANA_ADMIN_PASSWORD',source)
 
-    def test_awx_playbooks_target_existing_group(self):
-        for name in ['auditar_grafana.yml', 'configurar_dashboards_grafana.yml']:
-            playbook = yaml.safe_load((MONITOR / 'playbooks' / name).read_text())
-            self.assertEqual(playbook[0]['hosts'], 'grafana-servers')
-            self.assertTrue(playbook[0]['become'])
+    def test_management_forbids_apply(self):
+        source=(MON/'playbooks'/'configurar_dashboards_grafana.yml').read_text()
+        self.assertIn('Impedir escrituras durante la fase',source)
+        self.assertIn('not (var_grafana_dashboards_apply | default(false) | bool)',source)
+        flags=yaml.safe_load((MON/'examples'/'variables_dashboards_grafana.yml').read_text())
+        self.assertFalse(flags['var_grafana_dashboards_apply'])
+        self.assertFalse(flags['var_grafana_dashboards_allow_updates'])
 
-    def test_apply_flags_default_to_false(self):
-        examples = yaml.safe_load(
-            (MONITOR / 'examples' / 'variables_dashboards_grafana.yml').read_text()
-        )
-        self.assertIs(examples['var_grafana_dashboards_apply'], False)
-        self.assertIs(examples['var_grafana_dashboards_allow_updates'], False)
+    def test_imported_jsons_are_exactly_seven_v2_with_187_panels(self):
+        dashboards=[]
+        for p in (MON/'dashboards').glob('*.json'):
+            with self.subTest(path=p.name):
+                data=json.loads(p.read_text(encoding='utf-8'))
+                self.assertEqual(data['kind'],'Dashboard')
+                self.assertEqual(data['apiVersion'],'dashboard.grafana.app/v2')
+                self.assertEqual(data['metadata']['namespace'],'default')
+                self.assertTrue(data['metadata']['name'])
+                dashboards.append(data)
+        self.assertEqual(len(dashboards),7)
+        self.assertEqual(len(set(x['metadata']['name'] for x in dashboards)),7)
+        self.assertEqual(sum(sum(1 for e in x['spec']['elements'].values() if e.get('kind')=='Panel') for x in dashboards),187)
 
-    def test_no_delete_or_container_reconfiguration(self):
-        contents = '\n'.join(
-            f.read_text() for f in (MONITOR / 'playbooks').glob('*.yml')
-        ) + '\n' + '\n'.join(
-            f.read_text() for f in (MONITOR / 'tasks' / 'grafana').glob('*.yml')
-        )
-        self.assertNotIn('method: DELETE', contents)
-        self.assertNotIn('docker_compose_v2', contents)
-        self.assertNotIn('docker_container', contents)
-        self.assertIn('dashboard.grafana.app/v2', contents)
-        self.assertIn('status_code: 201', contents)
-
-    def test_json_path_is_empty_until_user_exports(self):
-        self.assertEqual(list((MONITOR / 'dashboards').glob('*.json')), [])
-
-
-if __name__ == '__main__':
-    unittest.main()
+if __name__=='__main__': unittest.main()

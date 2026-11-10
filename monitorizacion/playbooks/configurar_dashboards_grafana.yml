@@ -13,6 +13,36 @@
     var_grafana_dashboard_backup_dir: "{{ var_grafana_install_dir }}/backups/dashboards"
 
   pre_tasks:
+    - name: Impedir escrituras durante la fase de verificación del laboratorio
+      ansible.builtin.assert:
+        that:
+          - not (var_grafana_dashboards_apply | default(false) | bool)
+        fail_msg: >-
+          BLOQUEADO: esta versión de evaluación solo admite auditoría.
+          No se ha alterado ningún dashboard. Primero validaremos comparaciones
+          y backups antes de habilitar la aplicación en una entrega separada.
+
+    - name: Identificar variables ausentes sin revelar valores
+      ansible.builtin.set_fact:
+        var_grafana_missing_settings: >-
+          {{
+            (['var_grafana_port'] if var_grafana_port is not defined else [])
+            + (['var_grafana_admin_user'] if var_grafana_admin_user is not defined else [])
+            + (['VAR_GRAFANA_ADMIN_PASSWORD (credencial AWX)']
+               if (lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') | length == 0)
+               else [])
+            + (['var_grafana_install_dir'] if var_grafana_install_dir is not defined else [])
+          }}
+      changed_when: false
+
+    - name: Verificar variables de AWX con un mensaje legible
+      ansible.builtin.assert:
+        that:
+          - var_grafana_missing_settings | length == 0
+        fail_msg: >-
+          Faltan en AWX: {{ var_grafana_missing_settings | join(', ') }}.
+          Corrige las variables del grupo grafana-servers o la credencial del Job Template.
+
     - name: Comprobar variables necesarias y modos seguros
       ansible.builtin.assert:
         that:
@@ -31,7 +61,6 @@
         fail_msg: >-
           Faltan variables de Grafana o los flags deben ser booleanos
           (true/false sin comillas). Revisa grafana-servers y la credencial de AWX.
-      no_log: true
 
     - name: Localizar exportaciones JSON V2 incluidas en el proyecto Git
       ansible.builtin.set_fact:

@@ -1,32 +1,49 @@
 ---
 - name: Auditar Grafana, datasources y dashboards sin modificar datos
   hosts: grafana-servers
-  become: true
+  become: false
   gather_facts: false
 
   vars:
+    var_grafana_local_url: "http://127.0.0.1:{{ var_grafana_port }}"
     var_grafana_admin_password: >-
       {{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}
-    var_grafana_local_url: "http://127.0.0.1:{{ var_grafana_port }}"
 
   pre_tasks:
-    - name: Comprobar variables de Grafana en AWX
+    - name: Identificar variables ausentes sin revelar sus valores
+      ansible.builtin.set_fact:
+        var_grafana_missing_settings: >-
+          {{
+            (['var_grafana_port'] if var_grafana_port is not defined else [])
+            + (['var_grafana_admin_user'] if var_grafana_admin_user is not defined else [])
+            + (['VAR_GRAFANA_ADMIN_PASSWORD (credencial AWX)']
+               if (lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') | length == 0)
+               else [])
+          }}
+      changed_when: false
+
+    - name: Verificar variables necesarias de Grafana
       ansible.builtin.assert:
         that:
-          - var_grafana_port is defined
-          - var_grafana_admin_user is defined
-          - var_grafana_admin_user | length > 0
-          - var_grafana_admin_password | length > 0
-          - (var_grafana_port | string) is match('^[0-9]+$')
-          - var_grafana_port | int >= 1
-          - var_grafana_port | int <= 65535
+          - var_grafana_missing_settings | length == 0
         fail_msg: >-
-          Configura var_grafana_port y var_grafana_admin_user en grafana-servers,
-          e inyecta VAR_GRAFANA_ADMIN_PASSWORD desde una credencial de AWX.
-      no_log: true
+          Faltan en el Job Template o inventario AWX: {{ var_grafana_missing_settings | join(', ') }}.
+          Revisa el grupo grafana-servers y adjunta la misma credencial de Grafana
+          que utiliza instalar_grafana.yml. NO incluyas contraseñas en Extra Variables.
+
+    - name: Validar formato del puerto y del usuario
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - (var_grafana_port | int) >= 1
+          - (var_grafana_port | int) <= 65535
+          - (var_grafana_admin_user | string | trim | length) > 0
+        fail_msg: >-
+          var_grafana_port debe ser un puerto TCP válido (1-65535)
+          y var_grafana_admin_user no puede estar vacío.
 
   tasks:
-    - name: Verificar API y base de datos de Grafana
+    - name: Consultar salud de Grafana (GET, sin autenticación)
       ansible.builtin.uri:
         url: "{{ var_grafana_local_url }}/api/health"
         method: GET
@@ -39,39 +56,50 @@
       ansible.builtin.assert:
         that:
           - (var_grafana_health.json | default({})).get('database', '') == 'ok'
-        fail_msg: La base de datos de Grafana no comunica un estado saludable.
+        fail_msg: La base de datos de Grafana no comunica estado saludable.
 
-    - name: Consultar datasources sin modificarlos
-      ansible.builtin.uri:
-        url: "{{ var_grafana_local_url }}/api/datasources"
-        method: GET
-        url_username: "{{ var_grafana_admin_user }}"
-        url_password: "{{ var_grafana_admin_password }}"
-        force_basic_auth: true
-        return_content: true
-        status_code: 200
-      register: var_grafana_datasources
-      changed_when: false
-      no_log: true
+    - name: Consultar datasources y dashboards por API (solo lectura)
+      block:
+        - name: Consultar datasources (GET)
+          ansible.builtin.uri:
+            url: "{{ var_grafana_local_url }}/api/datasources"
+            method: GET
+            url_username: "{{ var_grafana_admin_user }}"
+            url_password: "{{ var_grafana_admin_password }}"
+            force_basic_auth: true
+            return_content: true
+            status_code: 200
+          register: var_grafana_datasources
+          changed_when: false
+          no_log: true
 
-    - name: Consultar dashboards existentes sin modificarlos
-      ansible.builtin.uri:
-        url: "{{ var_grafana_local_url }}/api/search?type=dash-db&limit=5000"
-        method: GET
-        url_username: "{{ var_grafana_admin_user }}"
-        url_password: "{{ var_grafana_admin_password }}"
-        force_basic_auth: true
-        return_content: true
-        status_code: 200
-      register: var_grafana_dashboards_list
-      changed_when: false
-      no_log: true
+        - name: Consultar dashboards existentes (GET)
+          ansible.builtin.uri:
+            url: "{{ var_grafana_local_url }}/api/search?type=dash-db&limit=5000"
+            method: GET
+            url_username: "{{ var_grafana_admin_user }}"
+            url_password: "{{ var_grafana_admin_password }}"
+            force_basic_auth: true
+            return_content: true
+            status_code: 200
+          register: var_grafana_dashboards_list
+          changed_when: false
+          no_log: true
+      rescue:
+        - name: Explicar error de conexión o autenticación sin filtrar credenciales
+          ansible.builtin.fail:
+            msg: >-
+              Grafana responde, pero falló una consulta autenticada.
+              Comprueba que el Job Template adjunta la credencial
+              VAR_GRAFANA_ADMIN_PASSWORD, que sus valores corresponden al
+              usuario actual de Grafana y que tiene permiso de lectura.
+              No pegues contraseñas en el log.
 
     - name: Mostrar inventario resumido de Grafana
       ansible.builtin.debug:
         msg:
-          - "Grafana API: OK. Base de datos: {{ var_grafana_health.json.database }}"
-          - "Fuentes: {{ var_grafana_datasources.json | default([]) | map(attribute='name') | list | sort | join(', ') }}"
+          - "Grafana API: OK; base de datos: {{ var_grafana_health.json.database }}"
+          - "Datasources: {{ var_grafana_datasources.json | default([]) | map(attribute='name') | list | sort | join(', ') }}"
           - "Dashboards encontrados: {{ var_grafana_dashboards_list.json | default([]) | length }}"
           - "Títulos: {{ var_grafana_dashboards_list.json | default([]) | map(attribute='title') | list | sort | join(' | ') }}"
-          - "Solo auditoría: no se han creado, actualizado ni eliminado recursos."
+          - "SOLO LECTURA: no se han modificado dashboards, datasources, Docker ni volúmenes."
