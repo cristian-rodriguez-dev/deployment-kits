@@ -1,0 +1,43 @@
+---
+- name: Consultar el UID existente antes de cualquier cambio
+  ansible.builtin.uri:
+    url: "{{ var_grafana_dashboard_api_base }}/{{ var_grafana_dashboard_resource.metadata.name }}"
+    method: GET
+    url_username: "{{ var_grafana_admin_user }}"
+    url_password: "{{ var_grafana_admin_password }}"
+    force_basic_auth: true
+    status_code:
+      - 200
+      - 404
+    return_content: true
+  register: var_grafana_existing_dashboard
+  changed_when: false
+  no_log: true
+
+- name: Añadir al plan de ejecución la existencia y las diferencias
+  ansible.builtin.set_fact:
+    var_grafana_dashboard_plan: >-
+      {{ var_grafana_dashboard_plan + [{
+         'resource': var_grafana_dashboard_resource,
+         'exists': var_grafana_existing_dashboard.status == 200,
+         'existing': var_grafana_existing_dashboard.json | default({}),
+         'needs_change': (
+           var_grafana_existing_dashboard.status == 404
+           or
+           (var_grafana_existing_dashboard.json.spec | default({}) | to_json(sort_keys=True))
+           !=
+           (var_grafana_dashboard_resource.spec | to_json(sort_keys=True))
+         )
+       }] }}
+  changed_when: false
+  no_log: true
+
+- name: Mostrar decisión de auditoría para este UID
+  ansible.builtin.debug:
+    msg: >-
+      {{ var_grafana_dashboard_resource.metadata.name }}:
+      {{ 'CREAR' if var_grafana_existing_dashboard.status == 404 else
+      ('ACTUALIZAR' if
+       (var_grafana_existing_dashboard.json.spec | default({}) | to_json(sort_keys=True))
+       != (var_grafana_dashboard_resource.spec | to_json(sort_keys=True))
+       else 'SIN CAMBIOS') }}.

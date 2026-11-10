@@ -17,30 +17,50 @@ spec:
 
   valuesContent: |-
     # ============================================================
-    # ALLOY
+    # POD SECURITY
+    # ============================================================
+
+    global:
+      podSecurityContext:
+        fsGroup: 473
+
+    # ============================================================
+    # ALLOY - KUBERNETES ONLY
     # ============================================================
 
     alloy:
       enableReporting: false
 
+      # La imagen oficial incluye el usuario alloy 473:473.
       securityContext:
-        privileged: true
-        runAsUser: 0
+        runAsUser: 473
+        runAsGroup: 473
+        runAsNonRoot: true
 
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+
+        capabilities:
+          drop:
+            - ALL
+
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Directorio escribible aislado dentro del pod.
       storagePath: /var/lib/alloy/data
 
       mounts:
-        varlog: true
+        varlog: false
         dockercontainers: false
 
         extra:
-          - name: docker-sock
-            mountPath: /var/run/docker.sock
-            readOnly: true
-
           - name: alloy-storage
             mountPath: /var/lib/alloy
-            readOnly: false
+
+      # ==========================================================
+      # CONFIGURACIÓN ALLOY
+      # ==========================================================
 
       configMap:
         create: true
@@ -51,12 +71,16 @@ spec:
           }
 
           // ======================================================
-          // KUBERNETES
+          // DESCUBRIMIENTO DE PODS
           // ======================================================
 
           discovery.kubernetes "pods" {
             role = "pod"
           }
+
+          // ======================================================
+          // LABELS
+          // ======================================================
 
           discovery.relabel "kubernetes_pods" {
             targets = discovery.kubernetes.pods.targets
@@ -98,127 +122,23 @@ spec:
             }
           }
 
+          // ======================================================
+          // LOGS DE KUBERNETES
+          // ======================================================
+
           loki.source.kubernetes "pods" {
             targets    = discovery.relabel.kubernetes_pods.output
             forward_to = [loki.write.local.receiver]
           }
 
           // ======================================================
-          // JOURNALD DEL SERVIDOR
-          // ======================================================
-
-          loki.relabel "host_journal" {
-            forward_to = []
-
-            rule {
-              source_labels = ["__journal__systemd_unit"]
-              target_label  = "unit"
-            }
-
-            rule {
-              source_labels = ["__journal_priority_keyword"]
-              target_label  = "priority"
-            }
-
-            rule {
-              source_labels = ["__journal_syslog_identifier"]
-              target_label  = "syslog_identifier"
-            }
-
-            rule {
-              source_labels = ["__journal__hostname"]
-              target_label  = "journal_hostname"
-            }
-          }
-
-          loki.source.journal "host" {
-            path          = "/var/log/journal"
-            max_age       = "12h"
-            relabel_rules = loki.relabel.host_journal.rules
-
-            labels = {
-              source = "journal",
-              host   = {{ var_prometheus_local_name | to_json }},
-            }
-
-            forward_to = [loki.write.local.receiver]
-          }
-
-          // ======================================================
-          // DOCKER
-          // ======================================================
-
-          discovery.docker "local" {
-            host = "unix:///var/run/docker.sock"
-          }
-
-          discovery.relabel "docker_logs" {
-            targets = []
-
-            // Nombre real del contenedor
-            rule {
-              source_labels = ["__meta_docker_container_name"]
-              regex         = "/(.*)"
-              target_label  = "container_name"
-              replacement   = "$1"
-            }
-
-            // Nombre por defecto del servicio
-            rule {
-              source_labels = ["__meta_docker_container_name"]
-              regex         = "/(.*)"
-              target_label  = "service_name"
-              replacement   = "$1"
-            }
-
-            // Servicio de Docker Compose
-            rule {
-              source_labels = [
-                "__meta_docker_container_label_com_docker_compose_service",
-              ]
-              target_label = "compose_service"
-            }
-
-            // Proyecto de Docker Compose
-            rule {
-              source_labels = [
-                "__meta_docker_container_label_com_docker_compose_project",
-              ]
-              target_label = "compose_project"
-            }
-
-            // Rename de compose_service a service_name
-            rule {
-              source_labels = [
-                "__meta_docker_container_label_com_docker_compose_service",
-              ]
-              regex        = "(.+)"
-              target_label = "service_name"
-              replacement  = "$1"
-            }
-          }
-
-          loki.source.docker "local" {
-            host    = "unix:///var/run/docker.sock"
-            targets = discovery.docker.local.targets
-
-            labels = {
-              source = "docker",
-              host   = {{ var_prometheus_local_name | to_json }},
-            }
-
-            relabel_rules = discovery.relabel.docker_logs.rules
-
-            forward_to = [loki.write.local.receiver]
-          }
-
-          // ======================================================
-          // ENVÍO A LOKI
+          // LOKI
           // ======================================================
 
           loki.write "local" {
             external_labels = {
-              cluster = "k3s-lab",
+              cluster   = "k3s-lab",
+              collector = "alloy-kubernetes",
             }
 
             endpoint {
@@ -230,6 +150,7 @@ spec:
         requests:
           cpu: 50m
           memory: 128Mi
+
         limits:
           cpu: 300m
           memory: 512Mi
@@ -244,15 +165,8 @@ spec:
 
       volumes:
         extra:
-          - name: docker-sock
-            hostPath:
-              path: /var/run/docker.sock
-              type: Socket
-
           - name: alloy-storage
-            hostPath:
-              path: /var/lib/alloy
-              type: DirectoryOrCreate
+            emptyDir: {}
 
     # ============================================================
     # SERVICIO

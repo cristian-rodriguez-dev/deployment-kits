@@ -1,0 +1,149 @@
+---
+- name: Auditar o aplicar dashboards Grafana V2 desde Git con seguridad
+  hosts: grafana-servers
+  become: true
+  gather_facts: true
+
+  vars:
+    var_grafana_admin_password: >-
+      {{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}
+    var_grafana_local_url: "http://127.0.0.1:{{ var_grafana_port }}"
+    var_grafana_dashboard_api_base: >-
+      {{ var_grafana_local_url }}/apis/dashboard.grafana.app/v2/namespaces/default/dashboards
+    var_grafana_dashboard_backup_dir: "{{ var_grafana_install_dir }}/backups/dashboards"
+
+  pre_tasks:
+    - name: Comprobar variables necesarias y modos seguros
+      ansible.builtin.assert:
+        that:
+          - var_grafana_install_dir is defined
+          - var_grafana_install_dir is match('^/[^\n]+$')
+          - var_grafana_install_dir != '/'
+          - var_grafana_port is defined
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - var_grafana_port | int >= 1
+          - var_grafana_port | int <= 65535
+          - var_grafana_admin_user is defined
+          - var_grafana_admin_user | length > 0
+          - var_grafana_admin_password | length > 0
+          - (var_grafana_dashboards_apply | default(false)) is boolean
+          - (var_grafana_dashboards_allow_updates | default(false)) is boolean
+        fail_msg: >-
+          Faltan variables de Grafana o los flags deben ser booleanos
+          (true/false sin comillas). Revisa grafana-servers y la credencial de AWX.
+      no_log: true
+
+    - name: Localizar exportaciones JSON V2 incluidas en el proyecto Git
+      ansible.builtin.set_fact:
+        var_grafana_dashboard_files: >-
+          {{ query('ansible.builtin.fileglob', playbook_dir ~ '/../dashboards/*.json') | sort }}
+        var_grafana_dashboard_resources: []
+      changed_when: false
+
+    - name: Leer los dashboards de forma local en el entorno de ejecución AWX
+      ansible.builtin.set_fact:
+        var_grafana_dashboard_resources: >-
+          {{ var_grafana_dashboard_resources + [(lookup('ansible.builtin.file', var_grafana_dashboard_file) | from_json)] }}
+      loop: "{{ var_grafana_dashboard_files }}"
+      loop_control:
+        loop_var: var_grafana_dashboard_file
+        label: "{{ var_grafana_dashboard_file | basename }}"
+      changed_when: false
+
+    - name: Validar que cada exportación utiliza el formato Grafana V2
+      ansible.builtin.assert:
+        that:
+          - var_grafana_dashboard_resource is mapping
+          - var_grafana_dashboard_resource.get('kind', '') == 'Dashboard'
+          - var_grafana_dashboard_resource.get('apiVersion', '') == 'dashboard.grafana.app/v2'
+          - var_grafana_dashboard_resource.get('metadata', {}) is mapping
+          - var_grafana_dashboard_resource.metadata.get('name', '') is match('^[A-Za-z0-9_-]{1,40}$')
+          - var_grafana_dashboard_resource.get('spec', {}) is mapping
+          - var_grafana_dashboard_resource.spec.get('title', '') | length > 0
+        fail_msg: Exportación inválida; se necesitan recursos Dashboard V2 con UID y título.
+      loop: "{{ var_grafana_dashboard_resources }}"
+      loop_control:
+        loop_var: var_grafana_dashboard_resource
+        label: "{{ var_grafana_dashboard_resource.get('metadata', {}).get('name', 'sin-uid') }}"
+
+    - name: Comprobar que los UIDs de los JSON son únicos
+      ansible.builtin.assert:
+        that:
+          - >-
+            (var_grafana_dashboard_resources | map(attribute='metadata.name') | list | length)
+            ==
+            (var_grafana_dashboard_resources | map(attribute='metadata.name') | unique | list | length)
+        fail_msg: Hay dos exportaciones con el mismo metadata.name (UID).
+
+    - name: Rechazar aplicación sin archivos JSON
+      ansible.builtin.assert:
+        that:
+          - var_grafana_dashboard_resources | length > 0
+        fail_msg: >-
+          No hay JSON en monitorizacion/dashboards/. Exporta primero los dashboards
+          existentes en formato V2 e inclúyelos en Git. No se ha cambiado Grafana.
+      when: var_grafana_dashboards_apply | default(false) | bool
+
+    - name: Comprobar que la API de Grafana responde
+      ansible.builtin.uri:
+        url: "{{ var_grafana_local_url }}/api/health"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: var_grafana_health
+      changed_when: false
+
+    - name: Confirmar base de datos saludable antes de escribir
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_health.json | default({})).get('database', '') == 'ok'
+        fail_msg: La base de datos de Grafana no está OK; operación cancelada.
+
+  tasks:
+    - name: Inicializar el plan de cambios en memoria
+      ansible.builtin.set_fact:
+        var_grafana_dashboard_plan: []
+      changed_when: false
+      no_log: true
+
+    - name: Auditar TODOS los dashboards antes de escribir ninguno
+      ansible.builtin.include_tasks: ../tasks/grafana/auditar_dashboard_v2.yml
+      loop: "{{ var_grafana_dashboard_resources }}"
+      loop_control:
+        loop_var: var_grafana_dashboard_resource
+        label: "{{ var_grafana_dashboard_resource.metadata.name }}"
+
+    - name: Rechazar de antemano las actualizaciones no autorizadas
+      ansible.builtin.assert:
+        that:
+          - >-
+            var_grafana_dashboards_allow_updates | default(false) | bool
+            or
+            (
+              var_grafana_dashboard_plan
+              | selectattr('exists', 'equalto', true)
+              | selectattr('needs_change', 'equalto', true)
+              | list | length
+            ) == 0
+        fail_msg: >-
+          Hay dashboards existentes con diferencias respecto a Git. Por seguridad
+          no se ha modificado ninguno. Revisa el plan de auditoría y autoriza
+          explícitamente var_grafana_dashboards_allow_updates: true cuando proceda.
+      when: var_grafana_dashboards_apply | default(false) | bool
+
+    - name: Aplicar solamente las modificaciones autorizadas
+      ansible.builtin.include_tasks: ../tasks/grafana/aplicar_dashboard_v2.yml
+      loop: "{{ var_grafana_dashboard_plan }}"
+      loop_control:
+        loop_var: var_grafana_dashboard_item
+        label: "{{ var_grafana_dashboard_item.resource.metadata.name }}"
+      when:
+        - var_grafana_dashboards_apply | default(false) | bool
+        - var_grafana_dashboard_item.needs_change
+
+    - name: Mostrar modo y número de dashboards revisados
+      ansible.builtin.debug:
+        msg:
+          - "Modo: {{ 'APLICAR' if (var_grafana_dashboards_apply | default(false) | bool) else 'AUDITORÍA' }}"
+          - "Dashboards definidos en Git: {{ var_grafana_dashboard_resources | length }}"
+          - "Sin borrado de dashboards, sin cambios en Docker Compose ni en la base de datos por fuera de la API."

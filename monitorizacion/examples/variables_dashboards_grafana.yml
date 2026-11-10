@@ -1,0 +1,12 @@
+---
+# Añadir a las variables del grupo grafana-servers en AWX.
+# No habilitar el modo aplicar hasta completar auditoría y disponer de los JSON V2.
+
+var_grafana_dashboards_apply: false
+var_grafana_dashboards_allow_updates: false
+
+# Heredadas del instalador ya utilizado; NO crear copias nuevas si ya existen:
+# var_grafana_install_dir: /ruta/actual/de/grafana
+# var_grafana_port: 3000
+# var_grafana_admin_user: usuario_actual
+# VAR_GRAFANA_ADMIN_PASSWORD: valor inyectado desde credencial AWX

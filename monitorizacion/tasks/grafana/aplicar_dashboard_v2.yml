@@ -1,0 +1,99 @@
+---
+- name: Crear directorio privado para backups de dashboards existentes
+  ansible.builtin.file:
+    path: "{{ var_grafana_dashboard_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: var_grafana_dashboard_item.exists
+
+- name: Guardar el recurso anterior antes de actualizarlo
+  ansible.builtin.copy:
+    dest: >-
+      {{ var_grafana_dashboard_backup_dir }}/{{ var_grafana_dashboard_item.resource.metadata.name }}-{{ ansible_date_time.iso8601_basic_short }}.json
+    content: "{{ var_grafana_dashboard_item.existing | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+  when: var_grafana_dashboard_item.exists
+  no_log: true
+  diff: false
+
+- name: Conservar la carpeta actual del dashboard existente
+  ansible.builtin.set_fact:
+    var_grafana_folder_uid: >-
+      {{
+        (var_grafana_dashboard_item.existing.get('metadata', {}).get('annotations', {})
+          | default({}, true)).get('grafana.app/folder', '')
+        if var_grafana_dashboard_item.exists else
+        (var_grafana_dashboard_item.resource.get('metadata', {}).get('annotations', {})
+          | default({}, true)).get('grafana.app/folder', '')
+      }}
+  changed_when: false
+
+- name: Crear dashboard nuevo desde JSON V2
+  ansible.builtin.uri:
+    url: "{{ var_grafana_dashboard_api_base }}"
+    method: POST
+    url_username: "{{ var_grafana_admin_user }}"
+    url_password: "{{ var_grafana_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      kind: Dashboard
+      apiVersion: dashboard.grafana.app/v2
+      metadata:
+        name: "{{ var_grafana_dashboard_item.resource.metadata.name }}"
+        annotations: >-
+          {{ {'grafana.app/folder': var_grafana_folder_uid} if var_grafana_folder_uid | length > 0 else {} }}
+      spec: "{{ var_grafana_dashboard_item.resource.spec }}"
+    status_code: 201
+    return_content: true
+  when: not var_grafana_dashboard_item.exists
+  no_log: true
+  diff: false
+
+- name: Actualizar dashboard tras respaldo y con concurrencia optimista
+  ansible.builtin.uri:
+    url: "{{ var_grafana_dashboard_api_base }}/{{ var_grafana_dashboard_item.resource.metadata.name }}"
+    method: PUT
+    url_username: "{{ var_grafana_admin_user }}"
+    url_password: "{{ var_grafana_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      kind: Dashboard
+      apiVersion: dashboard.grafana.app/v2
+      metadata:
+        name: "{{ var_grafana_dashboard_item.resource.metadata.name }}"
+        resourceVersion: "{{ var_grafana_dashboard_item.existing.metadata.resourceVersion }}"
+        annotations: >-
+          {{ {'grafana.app/folder': var_grafana_folder_uid} if var_grafana_folder_uid | length > 0 else {} }}
+      spec: "{{ var_grafana_dashboard_item.resource.spec }}"
+    status_code: 200
+    return_content: true
+  when: var_grafana_dashboard_item.exists
+  no_log: true
+  diff: false
+
+- name: Verificar mediante GET que el dashboard existe después de aplicar
+  ansible.builtin.uri:
+    url: "{{ var_grafana_dashboard_api_base }}/{{ var_grafana_dashboard_item.resource.metadata.name }}"
+    method: GET
+    url_username: "{{ var_grafana_admin_user }}"
+    url_password: "{{ var_grafana_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+    return_content: true
+  register: var_grafana_verified_dashboard
+  changed_when: false
+  no_log: true
+
+- name: Verificar que Grafana conserva el título esperado
+  ansible.builtin.assert:
+    that:
+      - var_grafana_verified_dashboard.json.spec.title == var_grafana_dashboard_item.resource.spec.title
+    fail_msg: >-
+      El título obtenido de Grafana no coincide con el esperado; detener y revisar.

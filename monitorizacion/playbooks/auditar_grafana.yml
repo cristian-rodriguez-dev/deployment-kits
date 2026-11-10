@@ -1,0 +1,77 @@
+---
+- name: Auditar Grafana, datasources y dashboards sin modificar datos
+  hosts: grafana-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_grafana_admin_password: >-
+      {{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}
+    var_grafana_local_url: "http://127.0.0.1:{{ var_grafana_port }}"
+
+  pre_tasks:
+    - name: Comprobar variables de Grafana en AWX
+      ansible.builtin.assert:
+        that:
+          - var_grafana_port is defined
+          - var_grafana_admin_user is defined
+          - var_grafana_admin_user | length > 0
+          - var_grafana_admin_password | length > 0
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - var_grafana_port | int >= 1
+          - var_grafana_port | int <= 65535
+        fail_msg: >-
+          Configura var_grafana_port y var_grafana_admin_user en grafana-servers,
+          e inyecta VAR_GRAFANA_ADMIN_PASSWORD desde una credencial de AWX.
+      no_log: true
+
+  tasks:
+    - name: Verificar API y base de datos de Grafana
+      ansible.builtin.uri:
+        url: "{{ var_grafana_local_url }}/api/health"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: var_grafana_health
+      changed_when: false
+
+    - name: Confirmar base de datos saludable
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_health.json | default({})).get('database', '') == 'ok'
+        fail_msg: La base de datos de Grafana no comunica un estado saludable.
+
+    - name: Consultar datasources sin modificarlos
+      ansible.builtin.uri:
+        url: "{{ var_grafana_local_url }}/api/datasources"
+        method: GET
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ var_grafana_admin_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: 200
+      register: var_grafana_datasources
+      changed_when: false
+      no_log: true
+
+    - name: Consultar dashboards existentes sin modificarlos
+      ansible.builtin.uri:
+        url: "{{ var_grafana_local_url }}/api/search?type=dash-db&limit=5000"
+        method: GET
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ var_grafana_admin_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: 200
+      register: var_grafana_dashboards_list
+      changed_when: false
+      no_log: true
+
+    - name: Mostrar inventario resumido de Grafana
+      ansible.builtin.debug:
+        msg:
+          - "Grafana API: OK. Base de datos: {{ var_grafana_health.json.database }}"
+          - "Fuentes: {{ var_grafana_datasources.json | default([]) | map(attribute='name') | list | sort | join(', ') }}"
+          - "Dashboards encontrados: {{ var_grafana_dashboards_list.json | default([]) | length }}"
+          - "Títulos: {{ var_grafana_dashboards_list.json | default([]) | map(attribute='title') | list | sort | join(' | ') }}"
+          - "Solo auditoría: no se han creado, actualizado ni eliminado recursos."
