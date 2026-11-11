@@ -1,0 +1,58 @@
+---
+- name: Localizar agente Wazuh
+  ansible.builtin.stat:
+    path: /var/ossec/etc/ossec.conf
+  register: _wazuh_ar_agent_conf
+
+- name: Localizar script existente
+  ansible.builtin.stat:
+    path: /var/ossec/active-response/bin/ssh-block-pilot.py
+    checksum_algorithm: sha1
+  register: _wazuh_ar_script_stat
+
+- name: Leer estado actual de cadena firewall
+  ansible.builtin.command:
+    argv: [/usr/sbin/iptables, -w, -S, WAZUH_SSH_BLOCK]
+  register: _wazuh_ar_rules_stat
+  changed_when: false
+  failed_when: false
+
+- name: Consultar UFW
+  ansible.builtin.command:
+    argv: [/usr/sbin/ufw, status]
+  register: _wazuh_ar_ufw
+  changed_when: false
+  failed_when: false
+
+- name: Consultar firewalld
+  ansible.builtin.command:
+    argv: [/usr/bin/systemctl, is-active, firewalld.service]
+  register: _wazuh_ar_firewalld
+  changed_when: false
+  failed_when: false
+
+- name: Consultar sockets en escucha
+  ansible.builtin.command:
+    argv: [/usr/bin/ss, -H, -ltn]
+  register: _wazuh_ar_listeners
+  changed_when: false
+  failed_when: false
+
+- name: Consultar unidad de arranque
+  ansible.builtin.command:
+    argv: [/usr/bin/systemctl, is-enabled, wazuh-ssh-firewall-init.service]
+  register: _wazuh_ar_service_enabled
+  changed_when: false
+  failed_when: false
+
+- name: Resumen de auditoria del agente
+  ansible.builtin.debug:
+    msg:
+      - "host={{ inventory_hostname }} wazuh_instalado={{ _wazuh_ar_agent_conf.stat.exists }}"
+      - "script_existente={{ _wazuh_ar_script_stat.stat.exists }}"
+      - "cadena_existente={{ _wazuh_ar_rules_stat.rc == 0 }}"
+      - "ufw={{ (_wazuh_ar_ufw.stdout | default('no disponible')) | trim }}"
+      - "firewalld={{ _wazuh_ar_firewalld.stdout | default('desconocido') }}"
+      - "systemd_habilitado={{ _wazuh_ar_service_enabled.rc == 0 }}"
+      - "ipv6_habilitado={{ var_wazuh_ar_ipv6_enabled }}; verificar escucha SSH IPv6 en salida ss"
+      - "bloqueos_actuales={{ (_wazuh_ar_rules_stat.stdout | regex_findall('(?m)^.* -j DROP$')) | length }}"

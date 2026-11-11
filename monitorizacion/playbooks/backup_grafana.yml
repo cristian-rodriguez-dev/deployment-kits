@@ -1,0 +1,175 @@
+---
+- name: Respaldar Grafana SQLite y sus volumenes sin modificar Grafana
+  hosts: grafana-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_grafana_backup_default_root: "{{ var_grafana_install_dir }}/backups/full"
+    var_grafana_backup_reserve_effective: "{{ var_grafana_backup_reserve_bytes | default(536870912) | int }}"
+
+  pre_tasks:
+    - name: Identificar variables ausentes sin exponer credenciales
+      ansible.builtin.set_fact:
+        var_grafana_backup_missing: >-
+          {{
+            (['var_grafana_install_dir'] if var_grafana_install_dir is not defined else [])
+            + (['var_grafana_project_name'] if var_grafana_project_name is not defined else [])
+            + (['var_grafana_port'] if var_grafana_port is not defined else [])
+          }}
+      changed_when: false
+
+    - name: Verificar variables minimas y rechazar check mode
+      ansible.builtin.assert:
+        that:
+          - var_grafana_backup_missing | length == 0
+          - not ansible_check_mode
+        fail_msg: >-
+          Revisa las variables del grupo grafana-servers: {{ var_grafana_backup_missing | join(', ') }}.
+          La copia necesita escribir archivos y no admite --check.
+
+    - name: Establecer ruta de backup desde variables de AWX
+      ansible.builtin.set_fact:
+        var_grafana_backup_root_effective: "{{ var_grafana_backup_root | default(var_grafana_backup_default_root) }}"
+      changed_when: false
+
+    - name: Validar ubicaciones, puerto y reserva sin modificar archivos
+      ansible.builtin.assert:
+        that:
+          - var_grafana_install_dir is match('^/[^\n]+$')
+          - var_grafana_install_dir != '/'
+          - var_grafana_backup_root_effective is match('^/[^\n]+$')
+          - var_grafana_backup_root_effective != '/'
+          - var_grafana_backup_root_effective != var_grafana_install_dir
+          - "'..' not in var_grafana_backup_root_effective.split('/')"
+          - "'..' not in var_grafana_install_dir.split('/')"
+          - "not var_grafana_backup_root_effective.startswith(var_grafana_install_dir ~ '/data')"
+          - "not var_grafana_backup_root_effective.startswith(var_grafana_install_dir ~ '/provisioning')"
+          - "not var_grafana_backup_root_effective.startswith(var_grafana_install_dir ~ '/secrets')"
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - var_grafana_port | int >= 1
+          - var_grafana_port | int <= 65535
+          - var_grafana_project_name | length > 0
+          - var_grafana_backup_reserve_effective | int >= 0
+        fail_msg: Ruta, puerto, proyecto o reserva de backup no validos.
+
+  tasks:
+    - name: Verificar que Grafana y SQLite estan saludables
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ var_grafana_port }}/api/health"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: var_grafana_backup_health_before
+      changed_when: false
+
+    - name: Confirmar base de datos saludable
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_backup_health_before.json | default({})).get('database', '') == 'ok'
+        fail_msg: Grafana no devuelve database=ok; copia cancelada.
+
+    - name: Verificar que existe Docker Compose en la ruta de Grafana
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir }}/docker-compose.yml"
+      register: var_grafana_backup_compose
+      changed_when: false
+
+    - name: Exigir despliegue existente antes de respaldarlo
+      ansible.builtin.assert:
+        that:
+          - var_grafana_backup_compose.stat.isreg | default(false)
+        fail_msg: No existe el Compose esperado; esta tarea no instala Grafana.
+
+    - name: Crear directorio privado para respaldos
+      ansible.builtin.file:
+        path: "{{ var_grafana_backup_root_effective }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Copiar script de backup seguro al servidor
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/grafana_full_backup.py"
+        dest: "{{ var_grafana_backup_root_effective }}/.grafana_full_backup.py"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Copiar verificador de integridad privado al servidor
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/verificar_backup_grafana.py"
+        dest: "{{ var_grafana_backup_root_effective }}/.verificar_backup_grafana.py"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Crear snapshot SQLite y paquete privado con SHA256
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ var_grafana_backup_root_effective }}/.grafana_full_backup.py"
+          - --install-dir
+          - "{{ var_grafana_install_dir }}"
+          - --backup-dir
+          - "{{ var_grafana_backup_root_effective }}"
+          - --project-name
+          - "{{ var_grafana_project_name }}"
+          - --reserve-bytes
+          - "{{ var_grafana_backup_reserve_effective | string }}"
+      register: var_grafana_backup_command
+      changed_when: true
+      diff: false
+
+    - name: Leer resumen seguro del backup
+      ansible.builtin.set_fact:
+        var_grafana_backup_result: "{{ var_grafana_backup_command.stdout | from_json }}"
+      changed_when: false
+
+    - name: Comprobar integridad SHA256 desde el servidor
+      ansible.builtin.command:
+        argv:
+          - sha256sum
+          - --check
+          - "{{ var_grafana_backup_result.sha256_file }}"
+        chdir: "{{ var_grafana_backup_root_effective }}"
+      register: var_grafana_backup_checksum
+      changed_when: false
+
+    - name: Validar cada archivo del TAR y la copia SQLite sin extraer secretos
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ var_grafana_backup_root_effective }}/.verificar_backup_grafana.py"
+          - --archive
+          - "{{ var_grafana_backup_result.archive }}"
+          - --sha256
+          - "{{ var_grafana_backup_result.sha256 }}"
+      register: var_grafana_backup_verify
+      changed_when: false
+      diff: false
+
+    - name: Comprobar que Grafana sigue disponible
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ var_grafana_port }}/api/health"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: var_grafana_backup_health_after
+      changed_when: false
+
+    - name: Exigir base de datos saludable tras el respaldo
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_backup_health_after.json | default({})).get('database', '') == 'ok'
+        fail_msg: El respaldo existe, pero Grafana ya no devuelve database=ok. Investigar antes de continuar.
+
+    - name: Mostrar resumen sin imprimir datos sensibles
+      ansible.builtin.debug:
+        msg:
+          - "Backup integral generado: {{ var_grafana_backup_result.archive }}"
+          - "SHA256: {{ var_grafana_backup_result.sha256 }}"
+          - "Archivos: {{ var_grafana_backup_result.file_count }}; tamano comprimido: {{ var_grafana_backup_result.archive_size }} bytes"
+          - "SQLite: copia online con comprobacion de integridad"
+          - "Grafana no se ha reiniciado ni modificado. Este respaldo contiene secretos: no subir a Git."

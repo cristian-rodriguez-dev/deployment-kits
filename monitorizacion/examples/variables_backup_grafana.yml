@@ -1,0 +1,8 @@
+---
+# Variables opcionales del grupo grafana-servers (proyecto antiguo).
+# Reutiliza las existentes var_grafana_install_dir, var_grafana_project_name y var_grafana_port.
+# No requiere contraseña de administrador de Grafana; actua sobre ficheros locales via SSH + become.
+# Directorio privado, preferiblemente en un disco distinto de la instalacion.
+# var_grafana_backup_root: /home/servidor/instalacion/grafana/backups/full
+# Reserva minima de espacio libre despues de estimar el volumen a copiar (512 MiB).
+# var_grafana_backup_reserve_bytes: 536870912

@@ -1,0 +1,9 @@
+---
+var_wazuh_ar_manager_mode: audit
+var_wazuh_ar_manager_apply: false
+var_wazuh_ar_manager_agents_ready: false
+var_wazuh_ar_manager_allow_migration: false
+var_wazuh_ar_manager_timeout: 180
+var_wazuh_ar_manager_rule: '5763'
+# Archivo del HOST que monta Docker, NUNCA editar ossec.conf solo dentro del contenedor.
+var_wazuh_ar_manager_config_path: "{{ (var_wazuh_install_dir | default('/ruta/no/configurada')) }}/single-node/config/wazuh_cluster/wazuh_manager.conf"

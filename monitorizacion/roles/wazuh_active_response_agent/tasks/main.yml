@@ -1,0 +1,13 @@
+---
+- name: Validar modo solicitado
+  ansible.builtin.assert:
+    that:
+      - var_wazuh_ar_agent_mode in ['audit', 'apply']
+    fail_msg: "Usa audit o apply."
+
+- name: Comprobar instalacion y firewall sin cambiar nada
+  ansible.builtin.include_tasks: audit.yml
+
+- name: Aplicar proteccion al agente solamente con autorizacion
+  ansible.builtin.include_tasks: apply.yml
+  when: var_wazuh_ar_agent_mode == 'apply'

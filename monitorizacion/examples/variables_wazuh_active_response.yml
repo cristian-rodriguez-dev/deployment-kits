@@ -1,0 +1,32 @@
+---
+# EJEMPLO para variables de grupos AWX: no copiar sin revisar rutas y redes.
+# Primera ejecucion: solo playbook auditar_wazuh_active_response.yml.
+# Primer apply: SOLO un agente de laboratorio (limitar plantilla en AWX).
+
+# Grupo monitoring-agents:
+var_wazuh_ar_agent_apply: false
+var_wazuh_ar_migrate_existing: false
+var_wazuh_ar_admin_networks_reviewed: false
+var_wazuh_ar_ssh_port: 22
+var_wazuh_ar_rules: ['5763']
+var_wazuh_ar_timeout: 180
+var_wazuh_ar_recovery: 240
+var_wazuh_ar_ipv6_enabled: false
+var_wazuh_ar_ack_ipv6_gap: false
+var_wazuh_ar_protected_networks:
+  - 127.0.0.0/8
+  - 192.168.56.0/24
+  - ::1/128
+# Incluye IPs publicas de AWX/VPN/administradores de TU entorno.
+var_wazuh_ar_protected_ips:
+  - 8.8.8.8
+var_wazuh_ar_excluded_log_sources:
+  - /var/ossec/logs/geoip-lab.log
+
+# Grupo wazuh-servers: definir EN SU GRUPO, NO mezclar con monitoring-agents.
+# var_wazuh_ar_manager_config_path: /home/servidor/instalacion/wazuh-docker/single-node/config/wazuh_cluster/wazuh_manager.conf
+# var_wazuh_ar_manager_apply: false
+# var_wazuh_ar_manager_agents_ready: false
+# var_wazuh_ar_manager_allow_migration: false
+# var_wazuh_ar_manager_rule: '5763'
+# var_wazuh_ar_manager_timeout: 180

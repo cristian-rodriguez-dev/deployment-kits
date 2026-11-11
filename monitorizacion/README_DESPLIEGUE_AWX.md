@@ -749,3 +749,16 @@ El departamento se utiliza como `job_name` y el nombre del equipo como etiqueta 
 La lista debe contener todos los equipos remotos que se desean monitorizar. La configuración se genera completa en cada ejecución.
 
 **Añadir un target no instala Node Exporter en el remoto.**
+
+## Extensión: Wazuh Active Response SSH
+
+El bloqueo reversible de IPs y su persistencia se automatizan **fuera de los
+playbooks de instalación y del Dashboard**. La auditoría, el despliegue de
+agentes y la preparación del Manager son pasos independientes.
+
+Ruta de documentación y controles de autorización:
+[`docs/WAZUH_ACTIVE_RESPONSE.md`](docs/WAZUH_ACTIVE_RESPONSE.md).
+
+**No incluir automáticamente la escritura del Manager en el workflow general**:
+primero validar los agentes, después aprobar por separado la migración de
+`defined-agent` a `local` y el reinicio controlado de `wazuh.manager`.

@@ -1,0 +1,6 @@
+---
+- name: Reinicializar firewall Wazuh
+  ansible.builtin.systemd_service:
+    name: wazuh-ssh-firewall-init.service
+    state: restarted
+    daemon_reload: true

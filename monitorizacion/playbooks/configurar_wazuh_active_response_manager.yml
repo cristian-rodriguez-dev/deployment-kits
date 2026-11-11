@@ -1,0 +1,12 @@
+---
+- name: Preparar configuracion Wazuh Manager Docker (sin reiniciar)
+  hosts: wazuh-servers
+  become: true
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Aplicar Manager tras autorizacion independiente
+      ansible.builtin.include_role:
+        name: "{{ playbook_dir }}/../roles/wazuh_active_response_manager"
+      vars:
+        var_wazuh_ar_manager_mode: apply

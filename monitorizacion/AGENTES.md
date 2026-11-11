@@ -292,3 +292,13 @@ Si además debe añadir hosts o editar sus variables, necesita los permisos de a
 - [AWX: workflows](https://docs.ansible.com/projects/awx/en/24.6.1/userguide/workflow_templates.html)
 - [Wazuh: instalación del agente Linux y compatibilidad](https://documentation.wazuh.com/current/installation-guide/wazuh-agent/wazuh-agent-package-linux.html)
 - [Wazuh: variables de despliegue Linux](https://documentation.wazuh.com/current/user-manual/agent/agent-enrollment/deployment-variables/deployment-variables-linux.html)
+
+## Protección SSH mediante Wazuh Active Response (bloque independiente)
+
+El piloto de bloqueo reversible ya se validó manualmente en el agente `005`. Para
+**auditarlo sin modificaciones** o preparar su adopción con AWX, consultar
+[`docs/WAZUH_ACTIVE_RESPONSE.md`](docs/WAZUH_ACTIVE_RESPONSE.md).
+
+No añadir esta función a los instaladores de agentes; usar los nuevos playbooks
+`auditar_wazuh_active_response.yml` y `configurar_wazuh_active_response_agentes.yml`.
+Primero ejecutar auditoría y una migración controlada en un único equipo.

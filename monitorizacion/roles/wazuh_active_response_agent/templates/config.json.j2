@@ -1,0 +1,11 @@
+{{ {
+ 'chain': 'WAZUH_SSH_BLOCK',
+ 'ssh_port': var_wazuh_ar_ssh_port | int,
+ 'rules': var_wazuh_ar_rules | map('string') | list,
+ 'block_seconds': var_wazuh_ar_timeout | int,
+ 'recovery_seconds': var_wazuh_ar_recovery | int,
+ 'enable_ipv6': var_wazuh_ar_ipv6_enabled | bool,
+ 'protected_networks': var_wazuh_ar_protected_networks,
+ 'protected_ips': var_wazuh_ar_protected_ips,
+ 'excluded_log_sources': var_wazuh_ar_excluded_log_sources
+} | to_nice_json }}

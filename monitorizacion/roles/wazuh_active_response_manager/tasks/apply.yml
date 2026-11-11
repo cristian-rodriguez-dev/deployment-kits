@@ -1,0 +1,42 @@
+---
+- name: Exigir confirmacion independiente del Manager
+  ansible.builtin.assert:
+    that:
+      - var_wazuh_ar_manager_apply | bool
+      - var_wazuh_ar_manager_agents_ready | bool
+    fail_msg: >-
+      No se aplica en manager sin var_wazuh_ar_manager_apply y
+      var_wazuh_ar_manager_agents_ready verdaderos. Confirmar que TODOS
+      los agentes alcanzados por location=local tienen el script instalado.
+
+- name: Preparar utilitario transaccional de configuracion
+  ansible.builtin.copy:
+    src: wazuh-ar-manager-config.py
+    dest: /usr/local/sbin/wazuh-ar-manager-config.py
+    owner: root
+    group: root
+    mode: '0750'
+    backup: true
+
+- name: Preparar argumentos de modificacion
+  ansible.builtin.set_fact:
+    _wazuh_ar_manager_argv: >-
+      {{ ['/usr/bin/python3', '/usr/local/sbin/wazuh-ar-manager-config.py',
+          '--file', var_wazuh_ar_manager_config_path, '--mode', 'apply',
+          '--timeout', var_wazuh_ar_manager_timeout | string, '--rule',
+          var_wazuh_ar_manager_rule | string, '--confirm-agents-ready']
+          + (['--allow-migration'] if var_wazuh_ar_manager_allow_migration | bool else []) }}
+
+- name: Aplicar solo bloques del comando y Active Response (sin restart)
+  ansible.builtin.command:
+    argv: "{{ _wazuh_ar_manager_argv }}"
+  register: _wazuh_ar_manager_change
+  changed_when: "'CHANGED' in _wazuh_ar_manager_change.stdout"
+  no_log: false
+
+- name: Recordar activacion diferida del Manager
+  ansible.builtin.debug:
+    msg: >-
+      {{ _wazuh_ar_manager_change.stdout }}.
+      NO se reinicio el contenedor. Tras revisar backup y desplegar agentes,
+      reinicia SOLO wazuh.manager en ventana autorizada y valida conexiones.

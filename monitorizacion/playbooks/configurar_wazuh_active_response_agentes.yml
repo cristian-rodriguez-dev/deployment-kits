@@ -1,0 +1,12 @@
+---
+- name: Aplicar Wazuh Active Response solo en agentes autorizados
+  hosts: monitoring-agents
+  become: true
+  gather_facts: true
+  serial: 1
+  tasks:
+    - name: Aplicar rol en agentes
+      ansible.builtin.include_role:
+        name: "{{ playbook_dir }}/../roles/wazuh_active_response_agent"
+      vars:
+        var_wazuh_ar_agent_mode: apply

@@ -1,0 +1,162 @@
+---
+- name: Exigir autorizacion y Ubuntu antes de escribir
+  ansible.builtin.assert:
+    that:
+      - var_wazuh_ar_agent_apply | bool
+      - var_wazuh_ar_admin_networks_reviewed | bool
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - _wazuh_ar_agent_conf.stat.exists
+      - _wazuh_ar_agent_conf.stat.isreg
+      - var_wazuh_ar_ssh_port | int >= 1
+      - var_wazuh_ar_ssh_port | int <= 65535
+      - var_wazuh_ar_timeout | int >= 1
+      - var_wazuh_ar_recovery | int > var_wazuh_ar_timeout | int
+      - var_wazuh_ar_rules | length > 0
+      - var_wazuh_ar_protected_networks | length > 0
+      - not ((_wazuh_ar_ufw.stdout | default('')) is search('Status: active'))
+      - (_wazuh_ar_firewalld.stdout | default('inactive')) != 'active' 
+      - "'-j DROP' not in (_wazuh_ar_rules_stat.stdout | default(''))"
+    fail_msg: >-
+      Aplicacion detenida: autorizacion ausente, instalacion incompatible,
+      UFW activo, valores invalidos o bloqueos temporales aun presentes.
+
+- name: Validar CIDR e IPs protegidas antes de instalar
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import sys,json,ipaddress;
+        v=json.loads(sys.argv[1]);
+        [ipaddress.ip_network(n, strict=False) for n in v['nets']];
+        [ipaddress.ip_address(n) for n in v['ips']];
+        assert '127.0.0.0/8' in v['nets'], 'loopback IPv4 obligatorio';
+        assert '::1/128' in v['nets'] or not v['ipv6'], 'loopback IPv6 obligatorio';
+        print('IPs y redes validadas')
+      - "{{ {'nets': var_wazuh_ar_protected_networks, 'ips': var_wazuh_ar_protected_ips, 'ipv6': var_wazuh_ar_ipv6_enabled} | to_json }}"
+  changed_when: false
+
+- name: Exigir aprobacion antes de migrar el script piloto
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (_wazuh_ar_script_stat.stat.exists | bool) or
+        _wazuh_ar_script_stat.stat.checksum ==
+          (lookup('file', role_path ~ '/files/ssh-block-pilot.py') | hash('sha1')) or
+        (var_wazuh_ar_migrate_existing | bool)
+    fail_msg: >-
+      El script existente difiere. Para migrarlo haz backup y aprueba
+      var_wazuh_ar_migrate_existing: true tras la auditoria.
+
+- name: Exigir reconocimiento de la limitacion IPv6
+  ansible.builtin.assert:
+    that:
+      - var_wazuh_ar_ipv6_enabled | bool or var_wazuh_ar_ack_ipv6_gap | bool
+    fail_msg: >-
+      Habilita proteccion IPv6 o confirma explicitamente var_wazuh_ar_ack_ipv6_gap.
+      SSH puede escuchar tambien por IPv6.
+
+- name: Crear directorio de configuracion
+  ansible.builtin.file:
+    path: /etc/wazuh-ssh-ar
+    state: directory
+    owner: root
+    group: wazuh
+    mode: '0750'
+
+- name: Crear directorio de estado root-only
+  ansible.builtin.file:
+    path: /var/lib/wazuh-ssh-ar
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Copiar configuracion del bloqueo
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: /etc/wazuh-ssh-ar/config.json
+    owner: root
+    group: wazuh
+    mode: '0640'
+    backup: true
+  register: _wazuh_ar_cfg_result
+  notify: Reinicializar firewall Wazuh
+
+- name: Copiar script Active Response con backup
+  ansible.builtin.copy:
+    src: ssh-block-pilot.py
+    dest: /var/ossec/active-response/bin/ssh-block-pilot.py
+    owner: root
+    group: wazuh
+    mode: '0750'
+    backup: true
+  register: _wazuh_ar_script_result
+
+- name: Copiar inicializador firewall
+  ansible.builtin.copy:
+    src: wazuh-ssh-firewall-init.py
+    dest: /usr/local/sbin/wazuh-ssh-firewall-init.py
+    owner: root
+    group: root
+    mode: '0755'
+    backup: true
+  register: _wazuh_ar_init_result
+  notify: Reinicializar firewall Wazuh
+
+- name: Validar sintaxis de los dos scripts
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, -c, "import ast,sys; ast.parse(open(sys.argv[1]).read())", "{{ item }}"]
+  changed_when: false
+  loop:
+    - /var/ossec/active-response/bin/ssh-block-pilot.py
+    - /usr/local/sbin/wazuh-ssh-firewall-init.py
+
+- name: Instalar servicio systemd idempotente
+  ansible.builtin.template:
+    src: wazuh-ssh-firewall-init.service.j2
+    dest: /etc/systemd/system/wazuh-ssh-firewall-init.service
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  register: _wazuh_ar_unit_result
+  notify: Reinicializar firewall Wazuh
+
+- name: Recargar systemd solo cuando cambie la unidad
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: _wazuh_ar_unit_result.changed
+
+- name: Habilitar inicializador sin reiniciar Wazuh Agent
+  ansible.builtin.systemd_service:
+    name: wazuh-ssh-firewall-init.service
+    enabled: true
+    state: started
+
+- name: Aplicar reinicializacion solo si cambiaron los archivos
+  ansible.builtin.meta: flush_handlers
+
+- name: Verificar el puente INPUT → cadena Wazuh
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/iptables
+      - -w
+      - -C
+      - INPUT
+      - -p
+      - tcp
+      - --dport
+      - "{{ var_wazuh_ar_ssh_port | string }}"
+      - -j
+      - WAZUH_SSH_BLOCK
+  changed_when: false
+
+- name: Informar sobre backups de migracion
+  ansible.builtin.debug:
+    msg:
+      - "Script: {{ _wazuh_ar_script_result.backup_file | default('sin backup; nuevo o sin cambios') }}"
+      - "Config JSON: {{ _wazuh_ar_cfg_result.backup_file | default('sin backup; nuevo o sin cambios') }}"
+      - "Inicializador: {{ _wazuh_ar_init_result.backup_file | default('sin backup; nuevo o sin cambios') }}"
+      - "Unidad: {{ _wazuh_ar_unit_result.backup_file | default('sin backup; nuevo o sin cambios') }}"
+      - "No se reinicio wazuh-agent; auditar tras el despliegue."

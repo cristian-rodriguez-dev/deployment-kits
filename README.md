@@ -1,70 +1,147 @@
-# Bloque 01 · Fase 4 — Incorporación ADITIVA de los ocho dashboards restantes
+# Bloque 01 — Grafana AWX v5: backup integral de Grafana
 
-**Proyecto:** `deployment-kits` (laboratorio antiguo) · **Fecha:** 10 de noviembre de 2026.
+**Alcance:** laboratorio antiguo `deployment-kits`, AWX/K3s, Grafana 13.2.3 sobre Docker Compose con SQLite y bind mounts. Este paquete añade archivos; **no modifica** los Jobs 10, 11 y 12 ni el instalador de Grafana. No ejecuta despliegues desde aquí.
 
-## Validación realizada con el respaldo de AWX
+## 1. Qué respaldamos
 
-- ZIP recibido: `grafana-dashboards-export.zip`.
-- SHA256 del ZIP: `fc2791cdb2f67e7d1208954129e3d5a54aeabae6633091ca56423be7f07e9e7f` (**coincide** con Job 12).
-- Manifiesto: **15 dashboards V2**, UID únicos y SHA256 de cada recurso correctos.
-- **7/7** definiciones originales ya incorporadas a Git: `spec` idéntico a la exportación.
-- **8/8** nuevos JSON: fieles, sin transformación, a las respuestas de API V2 de Grafana.
-- Total confirmado tras incorporar todos los archivos: **15 dashboards / 351 paneles** (los 7 originales: 187; los 8 adicionales: 164).
+Este Job 13 incluye:
 
-## ARCHIVOS DEL PAQUETE — solo añadidos
+| Contenido | Fuente en servidor | Método |
+|---|---|---|
+| Estado de Grafana (dashboards, usuarios, alertas, datasources, etc.) | `{{ var_grafana_install_dir }}/data/grafana.db` | API de copia online de SQLite, verificada con `PRAGMA quick_check` |
+| Plugins y demás datos locales | `.../data/` | Copia de archivos con SHA256 (sin copiar `grafana.db-wal`, `-shm` ni journals) |
+| Provisioning | `.../provisioning/` | Árbol completo |
+| Secreto de administrador | `.../secrets/` | Árbol completo; archivo sensible |
+| Definición del servicio | `.../docker-compose.yml` | Archivo completo |
+| Huella de inicialización de AWX | `.../.awx-initialized`, si existe | Archivo completo |
 
-```text
-monitorizacion/dashboards/
-├── geoip-map.json
-├── node-exporter-full.json
-├── wazuh-vulnerabilities.json
-├── wazuh-agent-status.json
-├── wazuh-correlation-prometheus.json
-├── wazuh-fim.json
-├── wazuh-sca.json
-└── wazuh-security-overview.json
+El playbook comprueba que los **tres bind mounts** esperados (`/var/lib/grafana`, `/etc/grafana/provisioning`, `/run/secrets/grafana_admin_password`) corresponden a esas rutas. Si detecta otros montajes, para con un error: hay que revisar su alcance, no ignorarlos.
 
-tools/verificar_cobertura_dashboards.py
+**Límites:** no respalda Prometheus, Loki, Wazuh, redes Docker, hosts remotos ni volúmenes de otros contenedores. La copia online de SQLite es consistente para la base de datos, pero no es una transacción atómica conjunta con archivos de plugins/provisioning que se modifiquen al mismo tiempo. No sustituye a un ensayo de restauración.
+
+Grafana recomienda una copia de sus archivos y base de datos, y para una copia *directa* de SQLite indica detener el servicio. Aquí **no copiamos el archivo SQLite en caliente**: usamos la API de backup online de SQLite, sin apagar Grafana. Aun así, el nivel de garantía que buscamos solo se alcanzará tras probar una restauración aislada.
+
+Referencias: [Grafana — Back up Grafana](https://grafana.com/docs/grafana/latest/administration/back-up-grafana/) · [SQLite — Online Backup API](https://www.sqlite.org/backup.html)
+
+## 2. Qué archivos añade
+
+```
+monitorizacion/
+├── playbooks/
+│   └── backup_grafana.yml
+├── files/
+│   ├── grafana_full_backup.py
+│   └── verificar_backup_grafana.py
+└── examples/
+    └── variables_backup_grafana.yml
+
+tools/
+└── verificar_backup_grafana.py
+
+tests/
+└── test_backup_grafana.py
 ```
 
-**No contiene ningún reemplazo** de los 7 JSON originales, ni de los playbooks 10, 11, 12, ni de variables AWX, ni de `docker-compose`.
+## 3. Preparación segura
 
-## Instrucciones: primero copia local, luego auditoría
+1. Descomprimir **solo sobre la raíz** de `deployment-kits`, conservando carpetas. No sobrescribe los Jobs previos.
+2. Revisar `git diff`, **no incluir** archivos de backup ni credenciales en Git.
+3. Commit, push y sincronización del proyecto antiguo en AWX.
+4. Crear Job Template: **`13 - Backup integral Grafana`**.
+5. Playbook: `monitorizacion/playbooks/backup_grafana.yml`.
+6. Inventario/grupo: el mismo utilizado por `10 - Auditar Grafana`, `grafana-servers`.
+7. Credencial: Machine/SSH con `become` (sudo). **No precisa credencial de Grafana**, ya que no consulta rutas autenticadas de la API ni envía contraseñas.
+8. Variables existentes del grupo: `var_grafana_install_dir`, `var_grafana_project_name`, `var_grafana_port`.
+9. Opcionales (por defecto no necesarias):
 
-1. Descomprimir este paquete **en la raíz del repositorio existente** que ya contiene `monitorizacion/dashboards/*.json` (los siete originales de la fase 2).
-2. No borrar ni reemplazar los siete originales. Revisar los ocho JSON exportados antes de añadirlos a Git privado: pueden contener direcciones internas, consultas y metadatos de instalación. La comprobación básica no encontró claves con nombres de contraseña/token/secret en esos JSON, pero no es una garantía exhaustiva. No publicar sin revisión.
-3. Ejecutar desde la raíz del repositorio (Windows PowerShell):
+```yaml
+# Defecto: <var_grafana_install_dir>/backups/full
+# var_grafana_backup_root: /ruta/externa/privada/grafana-full
 
-   ```powershell
-   python .\tools\verificar_cobertura_dashboards.py --repo . --export "$HOME\Downloads\grafana-dashboards-export.zip"
-   ```
+# Conserva como mínimo 512 MiB de reserva al estimar espacio de copia:
+# var_grafana_backup_reserve_bytes: 536870912
+```
 
-   Si guardaste el ZIP en otra carpeta, sustituye esa ruta. Debe mostrar **15 dashboards, 351 paneles, 15/15 coincidentes**. Si no lo conservas, omite `--export` para validar la cobertura y los SHA de los ocho nuevos.
-4. Revisar `git status --short` y el contenido antes del commit. Añadir exclusivamente los ocho JSON y la herramienta:
+**Antes de ejecutar:** comprobar espacio libre de disco; si no hay suficiente, se aborta sin eliminar nada. La copia queda por defecto en el mismo servidor: **no es un backup externo**. Idealmente establecer un destino en otro disco, montado y protegido.
 
-   ```bash
-   git add monitorizacion/dashboards tools/verificar_cobertura_dashboards.py
-   git commit -m "feat: track all Grafana dashboards from verified export"
-   git push
-   ```
+## 4. Comportamiento del Job 13
 
-5. Sincronizar el proyecto Git de AWX.
-6. Ejecutar únicamente **Job Template 11 — Gestionar Dashboards**, que en la versión v2 tiene el modo de escritura bloqueado por código. Confirmar:
+- GET de `/api/health` y `database=ok` antes y después del backup.
+- Comprobación del servicio Grafana en el proyecto Docker Compose y de los bind mounts montados.
+- Generación de un `grafana-full-YYYYMMDDTHHMMSSZ-xxxxxxxx.tar.gz` con manifiesto SHA256 de **cada archivo** y datos de UID/GID/permisos.
+- Generación de `.tar.gz.sha256` con checksum externo.
+- Archivo protegido con permisos `0600`, directorio de backups `0700`, propietario root.
+- Verificación del SHA256 y de **todos los archivos**, además de `PRAGMA quick_check` del snapshot SQLite.
+- No elimina backups antiguos, no rota, no reinicia Grafana, no escribe en Grafana ni ejecuta `docker compose up/down/restart`.
+- **Es normal que el Job muestre `changed > 0`**: ha creado backups locales, no ha modificado el servicio.
+- Si hay archivos cambiando durante la copia, symlinks o montajes inesperados, aborta: no debe maquillarse como correcto.
 
-   ```yaml
-   var_grafana_dashboards_apply: false
-   var_grafana_dashboards_allow_updates: false
-   ```
+**Resultado esperado:**
 
-7. Esperar `Dashboards definidos en Git: 15` y quince decisiones `SIN CAMBIOS`; `changed=0`, `failed=0`. Si aparece `CREAR` o `ACTUALIZAR`, detenerse y revisar la diferencia; **no activar escrituras**.
+```
+TASK [Mostrar resumen sin imprimir datos sensibles]
+ok: [ansible_server] => {
+    "msg": [
+        "Backup integral generado: /.../grafana-full-...tar.gz",
+        "SHA256: ...",
+        "Archivos: ...; tamano comprimido: ... bytes",
+        "SQLite: copia online con comprobacion de integridad",
+        "Grafana no se ha reiniciado ni modificado. Este respaldo contiene secretos: no subir a Git."
+    ]
+}
+PLAY RECAP: failed=0; unreachable=0
+```
 
-## Qué NO se ha implementado
+## 5. Verificación adicional sin descargar secretos
 
-- No se han cambiado dashboards del servidor ni creado nuevos. **Solo se amplía la fuente versionada.**
-- No se ha activado la aplicación por API (el Job 11 permanece bloqueado en modo auditoría).
-- Todavía falta una **copia de seguridad integral** de Grafana (DB, plugins, configuración, permisos, credenciales/datasources) y una **restauración probada** en un entorno separado.
-- Este respaldo de JSON no permite por sí solo recuperar una instancia completa ni reconstruir los secretos de los datasources.
+El propio Job 13 verifica en el servidor todo el contenido, incluido SQLite. Si necesitas repetir la comprobación, ejecuta en Ubuntu con la ruta del ZIP (realmente es `.tar.gz`) que indique AWX:
 
-## Próximo bloque
+```bash
+sudo python3 /RUTA/DE/BACKUP/.verificar_backup_grafana.py \
+  --archive /RUTA/DE/BACKUP/grafana-full-YYYYMMDDTHHMMSSZ-xxxxxxxx.tar.gz \
+  --sha256 SHA256_DEL_JOB_13
+```
 
-Tras verificar el Job 11 con los 15: preparar backup integral y restauración segura sin tocar la instancia funcional; después evaluar sincronización declarativa solo con autorización explícita y rollback probado.
+No compartas aquí el archivo `.tar.gz`: incluye la base de datos y credenciales.
+
+Para comprobación local opcional en Windows (solo si estás autorizado a copiar ese respaldo, **cifrado y protegido**), ejecuta desde el repo:
+
+```powershell
+uv run --python 3.15 --no-project .\tools\verificar_backup_grafana.py `
+  --archive "C:\ruta\grafana-full-....tar.gz" `
+  --sha256 "EL_SHA256_QUE_MOSTRÓ_AWX"
+```
+
+## 6. Restauración controlada: ensayo en una VM aislada
+
+**No restaurar sobre el Grafana actual.** El Job 13 es solo de backup; no incluye ninguna operación de restauración automática.
+
+En una VM *nueva y aislada* con Docker y la misma versión de Grafana:
+
+1. Instala Docker/Compose y prepara una ruta *igual que* `var_grafana_install_dir`, pero en esa VM, nunca en el servidor activo. Revisa conectividad y dependencias externas; la configuración puede hacer referencia a redes, URL y otros servicios del laboratorio original.
+2. Copia el backup por un canal autorizado **cifrado**, restringe su acceso a root y valida checksum y manifiesto con el verificador antes de extraer.
+3. Revisa el `docker-compose.yml` dentro del backup y evita exposición de puertos, conflicto de nombres y acceso accidental a producción.
+4. Restaura **solo en esa VM** con `sudo tar -xzf ... -C /ruta/de/staging`, después mueve el contenido `grafana/` a la ruta aislada prevista preservando UID/GID/permisos. Hazlo sin un Grafana en ejecución en esa VM.
+5. Asegura la red externa requerida por Compose, revisa mounts y levanta el servicio **en la VM aislada**. No cambies la imagen ni la DB en la prueba de primera restauración.
+6. Comprueba `GET /api/health` (base de datos `ok`), entrada a Grafana, inventario de dashboards (**15**) y sus **351 paneles**, usuarios, reglas de alertas, plugins y 5 datasources. Los datasources pueden no estar saludables si no se restauran sus servicios externos.
+7. Documenta fecha, tiempo de restauración, incidencias y resultado en un acta. Solo entonces se considerará *restauración verificada*.
+
+El backup es **portable bajo condiciones**, no un clon automático de todos los servicios ni un reemplazo de copias externas. La gestión de claves de cifrado debe ser independiente del servidor.
+
+## 7. Seguridad y documentación
+
+- **No introducir el `.tar.gz` ni `.sha256` en Git** (el `.sha256` identifica un respaldo sensible, aunque no sea secreto).
+- No trasladar una copia sin cifrar a un portátil personal o servicios cloud. Para transporte externo, cifrar primero con una clave pública gestionada por la organización (por ejemplo, `age`) y controlar quién puede descifrar.
+- Mantener `.md` del laboratorio actualizado al añadir el Job 13 a AWX: listado de Job Templates, ubicación/reten­ción de backups, permisos, pasos de recuperación, dependencia de Docker y SQLite.
+- No hacer limpiezas automáticas de respaldos sin política de retención aprobada. Vigilar consumo de disco; una copia con raíz en el mismo host no protege de pérdida del host.
+- **No activar todavía escrituras del Job 11**. El siguiente trabajo, una vez que el 13 pase, es practicar restauración aislada y definir la política de copias externas.
+
+## 8. Pruebas locales del paquete
+
+Con `uv` en Windows o Python del sistema:
+
+```powershell
+uv run --python 3.15 --no-project -m unittest discover -s .\tests -v
+```
+
+Los tests no hablan con Docker ni Grafana reales: prueban archivado, SQLite online, integridad, permisos, rechazo de symlinks y validación de montajes.

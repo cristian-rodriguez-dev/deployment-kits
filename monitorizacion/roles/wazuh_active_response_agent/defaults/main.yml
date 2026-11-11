@@ -1,0 +1,24 @@
+---
+# Por defecto SOLO auditoria: no instalar, adoptar ni reiniciar.
+var_wazuh_ar_agent_mode: audit
+var_wazuh_ar_agent_apply: false
+# Obligatorio al sustituir el script piloto ya instalado en cliente_1.
+var_wazuh_ar_migrate_existing: false
+# Confirmacion tras verificar la red AWX/VPN/admin de CADA host.
+var_wazuh_ar_admin_networks_reviewed: false
+var_wazuh_ar_ssh_port: 22
+var_wazuh_ar_rules: ['5763']
+var_wazuh_ar_timeout: 180
+var_wazuh_ar_recovery: 240
+var_wazuh_ar_ipv6_enabled: false
+# Si SSH escucha en IPv6 y no se habilita ip6tables, se exige aceptar el riesgo.
+var_wazuh_ar_ack_ipv6_gap: false
+# Ajustar antes de desplegar en entornos distintos: AWX, VPN, administradores.
+var_wazuh_ar_protected_networks:
+  - 127.0.0.0/8
+  - 192.168.56.0/24
+  - ::1/128
+var_wazuh_ar_protected_ips:
+  - 8.8.8.8
+var_wazuh_ar_excluded_log_sources:
+  - /var/ossec/logs/geoip-lab.log
