@@ -92,7 +92,8 @@ loki.relabel "host_journal" {
 
 loki.source.journal "host" {
   max_age = "5m"
-
+  matches = "_SYSTEMD_UNIT=ssh.service"
+  
   relabel_rules = loki.relabel.host_journal.rules
 
   labels = {
