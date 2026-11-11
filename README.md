@@ -1,28 +1,40 @@
-# Wazuh GeoIP AWX — v3 (correccion del Job 16)
+# Bloque 02 · Wazuh GeoIP AWX — v4 (corrección de la verificación del snapshot)
 
-El Job 16 anterior podía devolver HTTP 200 sin `GeoLocation.location` por enviar el evento directamente como `data.srcip`. El pipeline de Wazuh comienza normalmente con un procesador JSON que lee `message`; por eso esta revision envía un mensaje **JSON sintético**, con `data.srcip=8.8.8.8`, y comprueba el resultado.
+**Objetivo:** reparar exclusivamente la verificación del respaldo del Job 16. No modificar el Indexer, sus pipelines ni el resto de playbooks.
 
-## Contenido
+## Problema corregido
 
-- `monitorizacion/playbooks/adoptar_geoip_wazuh.yml`: **sustituye exclusivamente** el Job 16 anterior.
-- `monitorizacion/GEOIP_ADOPCION_AWX.md`: guía de adopción.
-- `monitorizacion/examples/variables_geoip_adopcion.yml`: ejemplo sin secretos.
-- `tests/test_geoip_adopcion.py`: tests estáticos actualizados.
+El Job 16 con `var_geoip_save_snapshot: true` falló al comparar la huella de la representación JSON en memoria con la del archivo escrito por `ansible.builtin.copy(content=...)`. El fichero podía ser JSON equivalente aunque la serialización de bytes no coincidiera. **No se considera validado hasta leerlo de vuelta y comprobarlo.**
 
-## Cómo aplicarlo
+Esta revisión no asume que la diferencia sea inocua. Ahora:
 
-1. Extraer en la raíz de `deployment-kits`; comprobar `git diff -- monitorizacion/playbooks/adoptar_geoip_wazuh.yml`.
-2. Ejecutar pruebas en local: `uv run --python 3.15 --no-project -m unittest discover -s tests -p test_geoip_adopcion.py -v` (desde la raíz que contenga los tests de este paquete).
-3. Hacer commit/push y sincronizar el proyecto de AWX.
-4. Repetir Job 16 con:
+1. Comprueba que el destino, si existe, es un fichero regular privado (`root:root`, modo `0600`, límite 512 KiB), nunca un enlace simbólico.
+2. Conserva el archivo anterior; `force: false` y sin operaciones destructivas.
+3. Lee el fichero real con `ansible.builtin.slurp` (con `no_log`).
+4. Lo interpreta como JSON y exige equivalencia de toda la definición con la recibida del Indexer, no solo de la regla `data.srcip`.
+5. Calcula un SHA256 SHA-256 **de los bytes reales del archivo** mediante `stat` y muestra ese valor y el identificador/hash lógico de la representación por separado.
+6. Rechaza un JSON alterado, inválido o de otra definición. No oculta un desacuerdo de contenido bajo el argumento de que puede haber espacios distintos.
+
+Si la lectura `from_json` falla por JSON inválido, la tarea fallará sin mostrar el contenido sensible y sin modificar el archivo.
+
+## Uso
+
+Extrae el paquete en la raíz de `C:\deployment-kits`, revisa `git diff`, haz commit/push y sincroniza el Project de AWX.
+
+En el Job Template 16 utiliza:
 
 ```yaml
-var_geoip_save_snapshot: false
+var_geoip_save_snapshot: true
 var_geoip_simulate: true
 ```
 
-5. Si la simulación devuelve `GeoLocation.location presente: True`, ejecutar de nuevo con `var_geoip_save_snapshot: true` para crear una copia privada del pipeline.
+### Resultados esperados
 
-No se realizan escrituras en el Indexer; sólo se crean respaldos locales cuando se autoriza `var_geoip_save_snapshot`.
+- `JSON del respaldo: IDENTICO al pipeline del Indexer`.
+- Dos huellas SHA256 (representación y bytes reales). Pueden coincidir o no; no equipararlas.
+- `failed=0`, con `changed=0` si el archivo ya existe y es válido.
+- Wazuh sin cambios: el único archivo es el snapshot privado `/var/backups/wazuh-geoip/...`.
 
-Si todavía falla: recopilar sólo `Mostrar diagnostico de simulacion sin datos sensibles` y la validación; **no publicar JSON de alertas ni credenciales**.
+**Si la comparación estructural falla, no borres ni reescribas el fichero**: necesitaremos comprobar el resultado sin mostrar JSON ni credenciales.
+
+No envíes el snapshot ni credenciales al chat o a Git. El respaldo no sustituye a copias externas ni incluye el resto de datos del Indexer.

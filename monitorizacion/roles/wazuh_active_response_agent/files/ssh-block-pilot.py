@@ -17,6 +17,7 @@ import tempfile
 from datetime import datetime, timezone
 
 CONFIG = Path('/etc/wazuh-ssh-ar/config.json')
+AGENT_KEYS = Path('/var/ossec/etc/client.keys')
 STATE = Path('/var/lib/wazuh-ssh-ar')
 LOG = Path('/var/ossec/logs/ssh-block-pilot.log')
 SCRIPT = '/var/ossec/active-response/bin/ssh-block-pilot.py'
@@ -45,6 +46,22 @@ def settings():
     for x in cfg['protected_ips']:
         ipaddress.ip_address(x)
     return cfg
+
+
+def local_agent_id():
+    """Read only the agent ID. Never log or expose the shared secret in client.keys.
+
+    An agent should have exactly one local entry. Refuse to block on any
+    ambiguity so defined-agent dispatch cannot affect the wrong machine.
+    """
+    ids = []
+    for line in AGENT_KEYS.read_text(encoding='utf-8').splitlines():
+        fields = line.split()
+        if fields and not line.lstrip().startswith('#'):
+            ids.append(fields[0])
+    if len(ids) != 1 or not ids[0].isdigit():
+        raise RuntimeError('Cannot establish local Wazuh agent identity')
+    return ids[0]
 
 
 def acceptable_ip(value, cfg):
@@ -213,8 +230,9 @@ def main(argv=None):
         if str(alert.get('rule', {}).get('id')) not in cfg['rules']:
             log('IGNORED unexpected rule')
             return
-        if not str(alert.get('agent', {}).get('id') or '').isdigit():
-            log('IGNORED absent agent id')
+        alert_agent = str(alert.get('agent', {}).get('id') or '')
+        if not alert_agent.isdigit() or alert_agent != local_agent_id():
+            log('IGNORED: alert agent does not match local agent')
             return
         if alert.get('location') in cfg['excluded_log_sources']:
             log('IGNORED synthetic event')

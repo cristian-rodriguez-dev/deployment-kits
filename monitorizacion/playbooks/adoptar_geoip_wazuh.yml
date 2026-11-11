@@ -224,17 +224,20 @@
       when: var_geoip_effective_save
       no_log: true
 
-    - name: Rechazar respaldos manipulados o enlaces simbolicos
+    - name: Rechazar rutas existentes inseguras sin sobrescribirlas
       ansible.builtin.assert:
         that:
           - >-
             not var_geoip_snapshot_existing.stat.exists or
-            (var_geoip_snapshot_existing.stat.isreg
-             and not var_geoip_snapshot_existing.stat.islnk
-             and var_geoip_snapshot_existing.stat.checksum == var_geoip_pipeline_sha256)
+            (var_geoip_snapshot_existing.stat.isreg | default(false)
+             and not (var_geoip_snapshot_existing.stat.islnk | default(false))
+             and var_geoip_snapshot_existing.stat.uid | default(-1) == 0
+             and var_geoip_snapshot_existing.stat.mode | default('') == '0600'
+             and var_geoip_snapshot_existing.stat.size | default(0) >= 2
+             and var_geoip_snapshot_existing.stat.size | default(0) <= 524288)
         fail_msg: >-
-          Ya existe un respaldo con este nombre, pero su contenido no coincide.
-          No se sobreescribira. Revisa manualmente el directorio privado.
+          Ya existe un respaldo con esta ruta, pero no cumple las condiciones
+          de tipo, propietario, permisos o tamaño. No se sobreescribirá.
         quiet: true
       when: var_geoip_effective_save
 
@@ -252,7 +255,7 @@
       no_log: true
       diff: false
 
-    - name: Confirmar integridad del respaldo generado
+    - name: Comprobar la integridad física del archivo respaldado
       ansible.builtin.stat:
         path: "{{ var_geoip_snapshot_file }}"
         follow: false
@@ -261,16 +264,58 @@
       when: var_geoip_effective_save
       no_log: true
 
-    - name: Validar huella del respaldo en disco
+    - name: Validar que el archivo es privado y regular
       ansible.builtin.assert:
         that:
-          - var_geoip_snapshot_verify.stat.isreg
-          - not var_geoip_snapshot_verify.stat.islnk
-          - var_geoip_snapshot_verify.stat.checksum == var_geoip_pipeline_sha256
+          - var_geoip_snapshot_verify.stat.isreg | default(false)
+          - not (var_geoip_snapshot_verify.stat.islnk | default(false))
+          - var_geoip_snapshot_verify.stat.uid | default(-1) == 0
+          - var_geoip_snapshot_verify.stat.mode | default('') == '0600'
+          - var_geoip_snapshot_verify.stat.size | default(0) >= 2
+          - var_geoip_snapshot_verify.stat.size | default(0) <= 524288
+          - (var_geoip_snapshot_verify.stat.checksum | default('')) is match('^[0-9a-f]{64}$')
         fail_msg: >-
-          No se ha podido verificar el respaldo local del pipeline.
-          No se ha modificado Wazuh.
+          El respaldo no cumple las condiciones de seguridad y legibilidad.
+          No se ha modificado Wazuh; el archivo no se sobrescribirá.
         quiet: true
+      when: var_geoip_effective_save
+
+    - name: Leer de vuelta el archivo para verificar su contenido real
+      ansible.builtin.slurp:
+        src: "{{ var_geoip_snapshot_file }}"
+      register: var_geoip_snapshot_read
+      when: var_geoip_effective_save
+      no_log: true
+
+    - name: Comparar el JSON guardado con la definición leída del Indexer
+      ansible.builtin.set_fact:
+        var_geoip_snapshot_matches_definition: >-
+          {{ (var_geoip_snapshot_read.content | b64decode | from_json)
+             == var_geoip_pipeline_definition }}
+      when: var_geoip_effective_save
+      no_log: true
+
+    - name: Exigir que el respaldo contiene la definición íntegra
+      ansible.builtin.assert:
+        that:
+          - var_geoip_snapshot_matches_definition | bool
+        fail_msg: >-
+          El JSON guardado NO coincide con la definición del pipeline.
+          El archivo existente se conserva sin sobrescribir y Wazuh no ha cambiado.
+          Revisa el respaldo privado antes de continuar.
+        quiet: true
+      when: var_geoip_effective_save
+
+    - name: Mostrar diagnóstico de huellas sin revelar la definición
+      ansible.builtin.debug:
+        msg:
+          - 'JSON del respaldo: IDENTICO al pipeline del Indexer'
+          - 'SHA256 de la representación: {{ var_geoip_pipeline_sha256 }}'
+          - 'SHA256 de los bytes guardados: {{ var_geoip_snapshot_verify.stat.checksum }}'
+          - >-
+            Hashes iguales: {{ var_geoip_snapshot_verify.stat.checksum == var_geoip_pipeline_sha256 }}.
+            Una diferencia no invalida el JSON si la comparación estructural es idéntica;
+            conservar ambos hashes para diagnóstico.
       when: var_geoip_effective_save
 
     - name: Mostrar resultado de adopcion sin secretos
@@ -278,7 +323,8 @@
         msg:
           - "Pipeline: {{ var_geoip_effective_pipeline }}"
           - "Procesadores GeoIP directos: {{ var_geoip_geo_processors | length }}"
-          - "SHA256 de la definicion: {{ var_geoip_pipeline_sha256 }}"
+          - "SHA256 de la representacion: {{ var_geoip_pipeline_sha256 }}"
+          - "SHA256 del respaldo en disco: {{ var_geoip_snapshot_verify.stat.checksum if var_geoip_effective_save else 'NO SOLICITADO' }}"
           - "Respaldo: {{ var_geoip_snapshot_file if var_geoip_effective_save else 'NO SOLICITADO' }}"
           - "Simulacion: {{ 'OK' if var_geoip_effective_simulate else 'NO EJECUTADA' }}"
           - 'Modo: ADOPCION SEGURA. No se han modificado pipelines, indices, reglas ni contenedores Wazuh.'

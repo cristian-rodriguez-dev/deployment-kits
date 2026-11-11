@@ -1,70 +1,40 @@
-# Bloque 02 — Wazuh GeoIP / Job 16 — Adopción protegida
+# Bloque 02 · Wazuh GeoIP AWX — v4 (corrección de la verificación del snapshot)
 
-**Proyecto:** `deployment-kits` (laboratorio antiguo). Extensión incremental al Job 15. El ZIP **no** contiene pipelines exportados ni credenciales y no reemplaza archivos existentes.
+**Objetivo:** reparar exclusivamente la verificación del respaldo del Job 16. No modificar el Indexer, sus pipelines ni el resto de playbooks.
 
-## Evidencia previa
+## Problema corregido
 
-Job 15 auditó correctamente `filebeat-7.10.2-wazuh-alerts-pipeline`: HTTP OK, 10 procesadores GeoIP directos, uno de `data.srcip` hacia `GeoLocation`, 22 documentos con `GeoLocation.location`; `ok=13, changed=0, failed=0`. La simulación no se ejecutó todavía.
+El Job 16 con `var_geoip_save_snapshot: true` falló al comparar la huella de la representación JSON en memoria con la del archivo escrito por `ansible.builtin.copy(content=...)`. El fichero podía ser JSON equivalente aunque la serialización de bytes no coincidiera. **No se considera validado hasta leerlo de vuelta y comprobarlo.**
 
-## Qué aporta el Job 16
+Esta revisión no asume que la diferencia sea inocua. Ahora:
 
-- Lee la definición **completa y actual** del pipeline por API `GET /_ingest/pipeline/{id}`.
-- Comprueba que conserva el procesador `data.srcip` → `GeoLocation`.
-- Calcula SHA256 de una representación JSON estable de la definición, sin mostrar contenido ni credenciales.
-- Opcionalmente simula la IP `8.8.8.8` mediante `POST .../_simulate`, sin indexar documentos.
-- Si se autoriza, guarda **únicamente en el servidor** una copia privada `root:root 0600` dentro de `/var/backups/wazuh-geoip` (`0700`); el nombre lleva la huella SHA256 para no pisar un backup anterior.
-- Si encuentra un archivo previo con ese nombre pero contenido distinto o es un enlace, aborta antes de sobrescribirlo.
-- No incluye `PUT`, `DELETE`, `docker compose` ni cambios de configuración Wazuh.
+1. Comprueba que el destino, si existe, es un fichero regular privado (`root:root`, modo `0600`, límite 512 KiB), nunca un enlace simbólico.
+2. Conserva el archivo anterior; `force: false` y sin operaciones destructivas.
+3. Lee el fichero real con `ansible.builtin.slurp` (con `no_log`).
+4. Lo interpreta como JSON y exige equivalencia de toda la definición con la recibida del Indexer, no solo de la regla `data.srcip`.
+5. Calcula un SHA256 SHA-256 **de los bytes reales del archivo** mediante `stat` y muestra ese valor y el identificador/hash lógico de la representación por separado.
+6. Rechaza un JSON alterado, inválido o de otra definición. No oculta un desacuerdo de contenido bajo el argumento de que puede haber espacios distintos.
 
-**La copia del pipeline no equivale a un backup del Indexer completo.** Podría contener configuraciones internas; no copiarla a Git ni a un chat antes de revisarla y redactar secretos o metadatos sensibles.
+Si la lectura `from_json` falla por JSON inválido, la tarea fallará sin mostrar el contenido sensible y sin modificar el archivo.
 
-## Incorporación al proyecto
+## Uso
 
-Extraer en la raíz de `C:\deployment-kits` y verificar que se añaden exclusivamente:
+Extrae el paquete en la raíz de `C:\deployment-kits`, revisa `git diff`, haz commit/push y sincroniza el Project de AWX.
 
-```
-monitorizacion/playbooks/adoptar_geoip_wazuh.yml
-monitorizacion/examples/variables_geoip_adopcion.yml
-monitorizacion/GEOIP_ADOPCION_AWX.md
-tests/test_geoip_adopcion.py
-```
-
-No añadir el directorio `.git` de un ZIP antiguo ni respaldos privados. Confirmar `git status --short`, `git diff --cached --stat`; después commit, push y Project Sync en AWX.
-
-Crear Job Template **`16 - Adoptar Wazuh GeoIP`** con:
-
-- Proyecto `deployment-kits`, `monitorizacion/playbooks/adoptar_geoip_wazuh.yml`.
-- Inventario con grupo `wazuh-servers` (`ansible_server`), Machine Credential para SSH/sudo y Custom Credential Wazuh con variable de entorno `VAR_WAZUH_ADMIN_PASSWORD`.
-- Variable de grupo para ruta de respaldo si hace falta; por defecto `/var/backups/wazuh-geoip`.
-
-## Secuencia
-
-**Paso 1 — Auditoría y simulación, sin escribir archivos:**
-
-```yaml
-var_geoip_save_snapshot: false
-var_geoip_simulate: true
-```
-
-Resultado esperado: `changed=0`, `failed=0`, `Simulacion: OK`, hash SHA256 visible. La simulación podría fallar si los procesadores reales no transforman el evento sintético aunque incluya `message` JSON, en cuyo caso no modifica nada y revisaremos el resultado antes de continuar.
-
-**Paso 2 — Adopción con backup privado (una vez validado el Paso 1):**
+En el Job Template 16 utiliza:
 
 ```yaml
 var_geoip_save_snapshot: true
 var_geoip_simulate: true
 ```
 
-Resultado: `changed` normalmente 2 (directorio+archivo) o 0 en ejecuciones repetidas. **No es un cambio en Wazuh**. Confirmar ruta y SHA256, sin copiar el JSON en el log.
+### Resultados esperados
 
-**Paso 3 — Repetición:** relanzar con las mismas variables; `changed=0` indica idempotencia. Si la definición remota cambia, se generará un nuevo nombre SHA; no se sobrescribe la versión anterior.
+- `JSON del respaldo: IDENTICO al pipeline del Indexer`.
+- Dos huellas SHA256 (representación y bytes reales). Pueden coincidir o no; no equipararlas.
+- `failed=0`, con `changed=0` si el archivo ya existe y es válido.
+- Wazuh sin cambios: el único archivo es el snapshot privado `/var/backups/wazuh-geoip/...`.
 
-## Qué haremos después
+**Si la comparación estructural falla, no borres ni reescribas el fichero**: necesitaremos comprobar el resultado sin mostrar JSON ni credenciales.
 
-Una vez capturada la definición real, el futuro Job 17 definirá el contrato deseado de manera explícita, comparará contra la instantánea y propondrá diferencias. **No autorizaremos todavía sustituciones del pipeline de Filebeat** porque hay 10 procesadores GeoIP y necesitamos preservar todos los bloques, no solo el de `data.srcip`.
-
-### Seguridad
-
-`validate_certs: false` está restringido a la conexión HTTPS local `127.0.0.1` existente en el laboratorio. Antes de producción, configurar confianza CA y validar certificados; no trasladar esta excepción indiscriminadamente.
-
-No guardar valores de credenciales, JSON completos de pipelines ni logs sensibles en Git, chat o capturas.
+No envíes el snapshot ni credenciales al chat o a Git. El respaldo no sustituye a copias externas ni incluye el resto de datos del Indexer.

@@ -1,5 +1,7 @@
 from pathlib import Path
 import unittest
+import json
+import hashlib
 import yaml
 
 BASE = Path(__file__).resolve().parents[1]
@@ -62,6 +64,35 @@ class GeoipAdopcionTests(unittest.TestCase):
         self.assertNotIn('var_geoip_sim_source }}', str(diagnostic))
         self.assertNotIn('var_geoip_sim_result.json }}', str(diagnostic))
         self.assertIn('Error de procesamiento', str(diagnostic))
+
+    def test_reads_backup_and_matches_full_json(self):
+        names = [t['name'] for t in self.tasks]
+        self.assertIn('Leer de vuelta el archivo para verificar su contenido real', names)
+        self.assertIn('Comparar el JSON guardado con la definición leída del Indexer', names)
+        self.assertIn('Exigir que el respaldo contiene la definición íntegra', names)
+        read_task = next(t for t in self.tasks if 'ansible.builtin.slurp' in t)
+        self.assertTrue(read_task['no_log'])
+        compare_task = next(t for t in self.tasks if t['name'].startswith('Comparar el JSON guardado'))
+        self.assertIn('from_json', str(compare_task))
+        self.assertTrue(compare_task['no_log'])
+
+    def test_disk_hash_and_secure_preexisting_file(self):
+        stat_tasks = [t for t in self.tasks if 'ansible.builtin.stat' in t]
+        self.assertTrue(any(t['ansible.builtin.stat'].get('checksum_algorithm') == 'sha256' for t in stat_tasks))
+        existing = next(t for t in self.tasks if t['name'].startswith('Rechazar rutas existentes'))
+        self.assertIn('stat.uid', str(existing))
+        self.assertIn("'0600'", str(existing))
+        self.assertNotIn('stat.checksum == var_geoip_pipeline_sha256', str(existing))
+        copy = next(t for t in self.tasks if 'ansible.builtin.copy' in t)
+        self.assertFalse(copy['ansible.builtin.copy']['force'])
+
+    def test_semantic_equivalence_not_naive_byte_equality(self):
+        expected = {'processors': [{'json': {'field': 'message'}}, {'geoip': {'field': 'data.srcip', 'target_field': 'GeoLocation'}}]}
+        pretty = json.dumps(expected, indent=2) + '\n'
+        compact = json.dumps(expected, separators=(',', ':'))
+        self.assertNotEqual(hashlib.sha256(pretty.encode()).hexdigest(), hashlib.sha256(compact.encode()).hexdigest())
+        self.assertEqual(json.loads(pretty), json.loads(compact))
+        self.assertNotEqual(json.loads(compact), {'processors': []})
 
     def test_default_audit(self):
         self.assertIn('var_geoip_save_snapshot | default(false) | bool', self.text)

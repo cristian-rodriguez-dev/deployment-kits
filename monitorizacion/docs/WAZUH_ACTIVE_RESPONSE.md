@@ -45,6 +45,9 @@
 ## Comportamiento de los scripts
 
 - El nuevo `ssh-block-pilot.py` acepta IPs públicas globales; rechaza IPs privadas, reservadas, loopback y listas protegidas; valida el `rule.id` y la ubicación del evento.
+- La respuesta `add` valida el `agent.id` contra el ID local de `/var/ossec/etc/client.keys` sin leer ni registrar la clave compartida; así, mientras el Manager siga usando `defined-agent`, una alerta de otro agente no bloqueará el cliente piloto. Si falta ese archivo o contiene varias identidades, falla de forma conservadora.
+- No se incluyen exclusiones públicas de laboratorio en las variables por defecto; cualquier IP administrativa externa debe añadirse tras revisión explícita.
+
 - `add` consulta Wazuh con `check_keys`, y solo acepta `continue`; un `abort` no toca iptables.
 - Antes de `DROP`, programa un temporizador systemd con **token único** y guarda el estado root-only bajo `/var/lib/wazuh-ssh-ar`.
 - `delete` compara el `alert.id` de Wazuh con el ID del bloqueo en curso. Si no existe o no coincide, no quita una regla nueva; la recuperación independiente usa el token. Esto puede aplazar el desbloqueo a 240 s si la notificación Wazuh `delete` no incluye el mismo ID.

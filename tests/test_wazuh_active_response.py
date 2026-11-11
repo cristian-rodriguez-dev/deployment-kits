@@ -46,6 +46,8 @@ class ActiveResponseTests(unittest.TestCase):
         self.module.STATE = self.base / 'state'
         self.module.LOG = self.base / 'events.log'
         self.module.CONFIG = self.base / 'config.json'
+        self.module.AGENT_KEYS = self.base / 'client.keys'
+        self.module.AGENT_KEYS.write_text('005 PC_SISTEMAS_1 any redacted-test-key\n')
         self.cfg = {
             'chain': 'WAZUH_SSH_BLOCK', 'ssh_port': 22, 'rules': ['5763'],
             'block_seconds': 180, 'recovery_seconds': 240,
@@ -140,6 +142,26 @@ class ActiveResponseTests(unittest.TestCase):
         with patch('sys.stdin', io.StringIO(json.dumps(message) + '\n')):
             self.module.main()
         self.assertEqual(len(self.timers), 1)
+
+    def test_wrong_alert_agent_is_rejected_with_defined_agent_dispatch(self):
+        foreign = dict(self.alert)
+        foreign['agent'] = {'id': '006'}
+        msg = {'command': 'add', 'parameters': {'alert': foreign}}
+        with patch('sys.stdin', io.StringIO(json.dumps(msg) + '\n')):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.module.main()
+        self.assertEqual(out.getvalue(), '')
+        self.assertFalse(self.rules)
+        self.assertFalse(self.timers)
+
+    def test_ambiguous_or_missing_local_agent_identity_cannot_block(self):
+        self.module.AGENT_KEYS.write_text('005 client x fakekey\n006 other x fakekey\n')
+        msg = {'command': 'add', 'parameters': {'alert': self.alert}}
+        with patch('sys.stdin', io.StringIO(json.dumps(msg) + '\n')):
+            with self.assertRaises(RuntimeError):
+                self.module.main()
+        self.assertFalse(self.rules)
+        self.assertFalse(self.timers)
 
     def test_unmanaged_rule_not_removed(self):
         ip = self.module.acceptable_ip('1.1.1.1', self.cfg)

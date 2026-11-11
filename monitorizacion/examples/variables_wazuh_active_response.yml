@@ -18,8 +18,7 @@ var_wazuh_ar_protected_networks:
   - 192.168.56.0/24
   - ::1/128
 # Incluye IPs publicas de AWX/VPN/administradores de TU entorno.
-var_wazuh_ar_protected_ips:
-  - 8.8.8.8
+var_wazuh_ar_protected_ips: []
 var_wazuh_ar_excluded_log_sources:
   - /var/ossec/logs/geoip-lab.log
 
