@@ -16,6 +16,7 @@
   register: _wazuh_ar_rules_stat
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Consultar UFW
   ansible.builtin.command:
@@ -23,6 +24,7 @@
   register: _wazuh_ar_ufw
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Consultar firewalld
   ansible.builtin.command:
@@ -30,6 +32,7 @@
   register: _wazuh_ar_firewalld
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Consultar sockets en escucha
   ansible.builtin.command:
@@ -37,6 +40,7 @@
   register: _wazuh_ar_listeners
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Consultar unidad de arranque
   ansible.builtin.command:
@@ -44,6 +48,7 @@
   register: _wazuh_ar_service_enabled
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Resumen de auditoria del agente
   ansible.builtin.debug:

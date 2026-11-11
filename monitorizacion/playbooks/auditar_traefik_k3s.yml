@@ -1,0 +1,196 @@
+---
+- name: Auditar Traefik de K3s sin cambiar recursos
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_traefik_namespace: kube-system
+    var_traefik_deployment_name: traefik
+    var_traefik_service_name: traefik
+    var_traefik_ingress_class_name: traefik
+    var_traefik_fail_if_missing: false
+    var_traefik_fail_if_not_ready: false
+
+  tasks:
+    - name: Verificar que Kubernetes responde
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - --raw=/readyz
+      register: var_traefik_k8s_ready
+      changed_when: false
+      failed_when: false
+
+    - name: Exigir acceso de solo lectura al API de K3s
+      ansible.builtin.assert:
+        that:
+          - var_traefik_k8s_ready.rc == 0
+          - var_traefik_k8s_ready.stdout | trim == 'ok'
+        fail_msg: >-
+          No se puede consultar el API de K3s con kubectl en el host destino.
+          Se interrumpe la auditoría sin modificar recursos.
+        success_msg: API de K3s disponible.
+
+    - name: Consultar Deployment de Traefik
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - deployment
+          - "{{ var_traefik_deployment_name }}"
+          - -n
+          - "{{ var_traefik_namespace }}"
+          - -o
+          - json
+          - --ignore-not-found
+      register: var_traefik_deployment_raw
+      changed_when: false
+      failed_when: var_traefik_deployment_raw.rc != 0
+
+    - name: Consultar Service de Traefik
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - service
+          - "{{ var_traefik_service_name }}"
+          - -n
+          - "{{ var_traefik_namespace }}"
+          - -o
+          - json
+          - --ignore-not-found
+      register: var_traefik_service_raw
+      changed_when: false
+      failed_when: var_traefik_service_raw.rc != 0
+
+    - name: Consultar Pods identificados como Traefik
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - pods
+          - -n
+          - "{{ var_traefik_namespace }}"
+          - -l
+          - app.kubernetes.io/name=traefik
+          - -o
+          - json
+      register: var_traefik_pods_raw
+      changed_when: false
+      failed_when: var_traefik_pods_raw.rc != 0
+
+    - name: Consultar clases de Ingress
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - ingressclasses
+          - -o
+          - json
+      register: var_traefik_ingressclasses_raw
+      changed_when: false
+      failed_when: var_traefik_ingressclasses_raw.rc != 0
+
+    - name: Consultar Ingress del cluster
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - ingress
+          - -A
+          - -o
+          - json
+      register: var_traefik_ingress_raw
+      changed_when: false
+      failed_when: var_traefik_ingress_raw.rc != 0
+
+    - name: Consultar IngressRoutes Traefik API actual si existen
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - ingressroutes.traefik.io
+          - -A
+          - -o
+          - json
+      register: var_traefik_routes_new_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Consultar IngressRoutes Traefik API anterior si existen
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - ingressroutes.traefik.containo.us
+          - -A
+          - -o
+          - json
+      register: var_traefik_routes_old_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Consultar HelmChart Traefik si está disponible en K3s
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - helmchart
+          - "{{ var_traefik_deployment_name }}"
+          - -n
+          - "{{ var_traefik_namespace }}"
+          - -o
+          - json
+          - --ignore-not-found
+      register: var_traefik_helmchart_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Preparar resultados JSON sin imprimir configuraciones
+      ansible.builtin.set_fact:
+        var_traefik_deployment: "{{ (var_traefik_deployment_raw.stdout | from_json) if (var_traefik_deployment_raw.stdout | trim | length > 0) else {} }}"
+        var_traefik_service: "{{ (var_traefik_service_raw.stdout | from_json) if (var_traefik_service_raw.stdout | trim | length > 0) else {} }}"
+        var_traefik_pods: "{{ var_traefik_pods_raw.stdout | from_json }}"
+        var_traefik_ingressclasses: "{{ var_traefik_ingressclasses_raw.stdout | from_json }}"
+        var_traefik_ingresses: "{{ var_traefik_ingress_raw.stdout | from_json }}"
+        var_traefik_routes_new: "{{ (var_traefik_routes_new_raw.stdout | from_json) if (var_traefik_routes_new_raw.rc == 0 and var_traefik_routes_new_raw.stdout | trim | length > 0) else {} }}"
+        var_traefik_routes_old: "{{ (var_traefik_routes_old_raw.stdout | from_json) if (var_traefik_routes_old_raw.rc == 0 and var_traefik_routes_old_raw.stdout | trim | length > 0) else {} }}"
+
+    - name: Exigir instalación presente solo si se ha solicitado
+      ansible.builtin.assert:
+        that:
+          - var_traefik_deployment | length > 0
+          - var_traefik_service | length > 0
+        fail_msg: Traefik no aparece como Deployment y Service esperados.
+      when: var_traefik_fail_if_missing | bool
+
+    - name: Exigir replicas listas solo si se ha solicitado
+      ansible.builtin.assert:
+        that:
+          - (var_traefik_deployment.status.availableReplicas | default(0) | int) >= 1
+        fail_msg: Traefik no tiene réplicas disponibles en el Deployment esperado.
+      when: var_traefik_fail_if_not_ready | bool
+
+    - name: Mostrar resumen de auditoria de Traefik sin datos sensibles
+      ansible.builtin.debug:
+        msg:
+          - "K3s API: OK; espacio de nombres: {{ var_traefik_namespace }}"
+          - "Deployment Traefik: {{ 'PRESENTE' if var_traefik_deployment | length > 0 else 'NO ENCONTRADO' }}; replicas deseadas: {{ var_traefik_deployment.spec.replicas | default(0) }}; disponibles: {{ var_traefik_deployment.status.availableReplicas | default(0) }}"
+          - "Service Traefik: {{ 'PRESENTE' if var_traefik_service | length > 0 else 'NO ENCONTRADO' }}; tipo: {{ var_traefik_service.spec.type | default('N/D') }}"
+          - "Pods con etiqueta Traefik: {{ var_traefik_pods['items'] | default([]) | length }}"
+          - "Ingress total: {{ var_traefik_ingresses['items'] | default([]) | length }}; clase {{ var_traefik_ingress_class_name }}: {{ var_traefik_ingresses['items'] | default([]) | selectattr('spec.ingressClassName', 'defined') | selectattr('spec.ingressClassName', 'equalto', var_traefik_ingress_class_name) | list | length }}"
+          - "IngressClasses total: {{ var_traefik_ingressclasses['items'] | default([]) | length }}"
+          - "IngressRoutes API actual: {{ (var_traefik_routes_new['items'] | default([]) | length | string) if var_traefik_routes_new_raw.rc == 0 else 'NO DISPONIBLE / SIN PERMISO' }}; API antigua: {{ (var_traefik_routes_old['items'] | default([]) | length | string) if var_traefik_routes_old_raw.rc == 0 else 'NO DISPONIBLE / SIN PERMISO' }}"
+          - "HelmChart K3s Traefik: {{ 'PRESENTE' if (var_traefik_helmchart_raw.rc == 0 and var_traefik_helmchart_raw.stdout | trim | length > 0) else 'NO DISPONIBLE / NO ENCONTRADO' }}"
+          - 'Modo: AUDITORIA; no se han instalado, cambiado ni reiniciado recursos, rutas, servicios ni certificados.'

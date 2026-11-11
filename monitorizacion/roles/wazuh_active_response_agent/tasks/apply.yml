@@ -13,7 +13,7 @@
       - var_wazuh_ar_recovery | int > var_wazuh_ar_timeout | int
       - var_wazuh_ar_rules | length > 0
       - var_wazuh_ar_protected_networks | length > 0
-      - not ((_wazuh_ar_ufw.stdout | default('')) is search('Status: active'))
+      - "not ((_wazuh_ar_ufw.stdout | default('')) is search('Status: active'))"
       - (_wazuh_ar_firewalld.stdout | default('inactive')) != 'active' 
       - "'-j DROP' not in (_wazuh_ar_rules_stat.stdout | default(''))"
     fail_msg: >-
