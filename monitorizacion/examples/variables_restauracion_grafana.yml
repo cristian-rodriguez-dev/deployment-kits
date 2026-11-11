@@ -1,0 +1,13 @@
+---
+# Variables de ejemplo para el Job 14 en grupo exclusivo grafana-restore-lab.
+# REVISAR en AWX: el ensayo JAMAS debe apuntar al ansible_server original.
+
+# var_grafana_restore_archive: /home/restore/.grafana-restore-inbox/grafana-full-20261111T083927Z-cfdddd9b.tar.gz
+# var_grafana_restore_sha256: 56881e757a51df805a83f4c7d47efcc02e0ea879b111f5e11ec813bc92bc3b29
+# var_grafana_restore_source_address: 192.168.56.20
+# var_grafana_restore_live_install_dir: /home/servidor/instalacion/grafana
+# var_grafana_restore_expected_dashboards: 15
+# var_grafana_restore_work_root: /var/lib/grafana-restore-lab
+# var_grafana_restore_reserve_bytes: 536870912
+# Primero false para auditar sin cambios. Solo true en VM aislada despues de AUDITORIA OK.
+# var_grafana_restore_apply: false

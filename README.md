@@ -1,147 +1,139 @@
-# Bloque 01 — Grafana AWX v5: backup integral de Grafana
+# Bloque 01 — Grafana AWX v6: Job 14 (ensayo offline de restauración)
 
-**Alcance:** laboratorio antiguo `deployment-kits`, AWX/K3s, Grafana 13.2.3 sobre Docker Compose con SQLite y bind mounts. Este paquete añade archivos; **no modifica** los Jobs 10, 11 y 12 ni el instalador de Grafana. No ejecuta despliegues desde aquí.
+**Proyecto antiguo:** `deployment-kits` (Ansible/AWX). Añade un playbook nuevo y scripts de validación; NO modifica los Jobs 10–13 ni la instalación de Grafana.
 
-## 1. Qué respaldamos
+**Estado:** código y pruebas locales preparados. **No ejecutado en AWX ni probado con el TAR real**, porque el respaldo contiene secretos y permanece en el servidor. No representa todavía una restauración funcional completa.
 
-Este Job 13 incluye:
+## Alcance y garantías
 
-| Contenido | Fuente en servidor | Método |
-|---|---|---|
-| Estado de Grafana (dashboards, usuarios, alertas, datasources, etc.) | `{{ var_grafana_install_dir }}/data/grafana.db` | API de copia online de SQLite, verificada con `PRAGMA quick_check` |
-| Plugins y demás datos locales | `.../data/` | Copia de archivos con SHA256 (sin copiar `grafana.db-wal`, `-shm` ni journals) |
-| Provisioning | `.../provisioning/` | Árbol completo |
-| Secreto de administrador | `.../secrets/` | Árbol completo; archivo sensible |
-| Definición del servicio | `.../docker-compose.yml` | Archivo completo |
-| Huella de inicialización de AWX | `.../.awx-initialized`, si existe | Archivo completo |
+- **AUDITORÍA (predeterminado):** valida destino aislado, marca manual, ausencia de Grafana existente, presencia y SHA256 del archivo. No crea carpetas ni extrae datos.
+- **ENSAYO OFFLINE (`var_grafana_restore_apply: true`):** revalida **todo** el archivo del Job 13 (SHA256 global, manifiesto, hashes por fichero y SQLite), reconstruye su estructura y permisos en una carpeta **privada de una VM dedicada**, ejecuta `PRAGMA integrity_check` y contrasta los 15 dashboards almacenados en SQLite. Opcionalmente informa del número de datasources y reglas de alertas en la base restaurada.
+- No invoca `docker`, `docker compose`, `systemctl` para efectuar cambios; no publica puertos ni accede a los servicios de la instalación principal. Las únicas acciones Docker son lectura para comprobar que no esté ejecutándose Grafana en el destino.
+- No sobrescribe ensayos existentes: repetir con el mismo TAR comprueba los ficheros y devuelve `YA_VALIDADO` y `changed=false` para la tarea de restauración.
+- **No es todavía un ensayo E2E:** no se ha arrancado una segunda instancia, ni probado sus plugins/datasources/alertas. Eso requiere otro ensayo controlado y sin acceso a los servicios originales.
 
-El playbook comprueba que los **tres bind mounts** esperados (`/var/lib/grafana`, `/etc/grafana/provisioning`, `/run/secrets/grafana_admin_password`) corresponden a esas rutas. Si detecta otros montajes, para con un error: hay que revisar su alcance, no ignorarlos.
+## Archivos (rutas relativas a la raíz de `deployment-kits`)
 
-**Límites:** no respalda Prometheus, Loki, Wazuh, redes Docker, hosts remotos ni volúmenes de otros contenedores. La copia online de SQLite es consistente para la base de datos, pero no es una transacción atómica conjunta con archivos de plugins/provisioning que se modifiquen al mismo tiempo. No sustituye a un ensayo de restauración.
-
-Grafana recomienda una copia de sus archivos y base de datos, y para una copia *directa* de SQLite indica detener el servicio. Aquí **no copiamos el archivo SQLite en caliente**: usamos la API de backup online de SQLite, sin apagar Grafana. Aun así, el nivel de garantía que buscamos solo se alcanzará tras probar una restauración aislada.
-
-Referencias: [Grafana — Back up Grafana](https://grafana.com/docs/grafana/latest/administration/back-up-grafana/) · [SQLite — Online Backup API](https://www.sqlite.org/backup.html)
-
-## 2. Qué archivos añade
-
-```
+```text
 monitorizacion/
-├── playbooks/
-│   └── backup_grafana.yml
-├── files/
-│   ├── grafana_full_backup.py
-│   └── verificar_backup_grafana.py
-└── examples/
-    └── variables_backup_grafana.yml
-
-tools/
-└── verificar_backup_grafana.py
-
-tests/
-└── test_backup_grafana.py
+├── playbooks/ensayar_restauracion_grafana.yml
+├── files/ensayar_restauracion_grafana.py
+├── files/verificar_backup_grafana.py  # copia IDENTICA de v5; no cambia su funcionamiento
+├── examples/variables_restauracion_grafana.yml
+└── RESTAURACION_GRAFANA_AWX.md
+tests/test_restauracion_grafana.py
 ```
 
-## 3. Preparación segura
+La copia del verificador de v5 está incluida solo para hacer autocontenido este ZIP; **es byte a byte idéntica al archivo usado por el Job 13**. No sustituir por una versión distinta.
 
-1. Descomprimir **solo sobre la raíz** de `deployment-kits`, conservando carpetas. No sobrescribe los Jobs previos.
-2. Revisar `git diff`, **no incluir** archivos de backup ni credenciales en Git.
-3. Commit, push y sincronización del proyecto antiguo en AWX.
-4. Crear Job Template: **`13 - Backup integral Grafana`**.
-5. Playbook: `monitorizacion/playbooks/backup_grafana.yml`.
-6. Inventario/grupo: el mismo utilizado por `10 - Auditar Grafana`, `grafana-servers`.
-7. Credencial: Machine/SSH con `become` (sudo). **No precisa credencial de Grafana**, ya que no consulta rutas autenticadas de la API ni envía contraseñas.
-8. Variables existentes del grupo: `var_grafana_install_dir`, `var_grafana_project_name`, `var_grafana_port`.
-9. Opcionales (por defecto no necesarias):
+## 1. Preparar una VM de restauración, NO el servidor Grafana
 
-```yaml
-# Defecto: <var_grafana_install_dir>/backups/full
-# var_grafana_backup_root: /ruta/externa/privada/grafana-full
+Se necesita una **VM Ubuntu separada** con SSH, Python 3 y acceso de AWX por una credencial Machine con `become`. Preferiblemente host-only o red de gestión restringida, sin acceso a producción. **No usar `ansible_server`, ni ninguna VM que ya tenga Grafana.** Si no existe esa VM, no ejecutes aún el Job 14.
 
-# Conserva como mínimo 512 MiB de reserva al estimar espacio de copia:
-# var_grafana_backup_reserve_bytes: 536870912
-```
+En AWX, añadir la VM exclusivamente al grupo `grafana-restore-lab` (nombre con guiones, como las plantillas del proyecto antiguo). No añadir el servidor original a ese grupo. La VM de ensayo necesita espacio libre para descomprimir el TAR (además de una reserva mínima de 512 MiB); el script calcula el volumen necesario según el manifiesto.
 
-**Antes de ejecutar:** comprobar espacio libre de disco; si no hay suficiente, se aborta sin eliminar nada. La copia queda por defecto en el mismo servidor: **no es un backup externo**. Idealmente establecer un destino en otro disco, montado y protegido.
-
-## 4. Comportamiento del Job 13
-
-- GET de `/api/health` y `database=ok` antes y después del backup.
-- Comprobación del servicio Grafana en el proyecto Docker Compose y de los bind mounts montados.
-- Generación de un `grafana-full-YYYYMMDDTHHMMSSZ-xxxxxxxx.tar.gz` con manifiesto SHA256 de **cada archivo** y datos de UID/GID/permisos.
-- Generación de `.tar.gz.sha256` con checksum externo.
-- Archivo protegido con permisos `0600`, directorio de backups `0700`, propietario root.
-- Verificación del SHA256 y de **todos los archivos**, además de `PRAGMA quick_check` del snapshot SQLite.
-- No elimina backups antiguos, no rota, no reinicia Grafana, no escribe en Grafana ni ejecuta `docker compose up/down/restart`.
-- **Es normal que el Job muestre `changed > 0`**: ha creado backups locales, no ha modificado el servicio.
-- Si hay archivos cambiando durante la copia, symlinks o montajes inesperados, aborta: no debe maquillarse como correcto.
-
-**Resultado esperado:**
-
-```
-TASK [Mostrar resumen sin imprimir datos sensibles]
-ok: [ansible_server] => {
-    "msg": [
-        "Backup integral generado: /.../grafana-full-...tar.gz",
-        "SHA256: ...",
-        "Archivos: ...; tamano comprimido: ... bytes",
-        "SQLite: copia online con comprobacion de integridad",
-        "Grafana no se ha reiniciado ni modificado. Este respaldo contiene secretos: no subir a Git."
-    ]
-}
-PLAY RECAP: failed=0; unreachable=0
-```
-
-## 5. Verificación adicional sin descargar secretos
-
-El propio Job 13 verifica en el servidor todo el contenido, incluido SQLite. Si necesitas repetir la comprobación, ejecuta en Ubuntu con la ruta del ZIP (realmente es `.tar.gz`) que indique AWX:
+En la **VM aislada**, después de verificar manualmente su identidad, crear el marcador de autorización:
 
 ```bash
-sudo python3 /RUTA/DE/BACKUP/.verificar_backup_grafana.py \
-  --archive /RUTA/DE/BACKUP/grafana-full-YYYYMMDDTHHMMSSZ-xxxxxxxx.tar.gz \
-  --sha256 SHA256_DEL_JOB_13
+printf 'GRAFANA_RESTORE_LAB_ONLY_v1\n' | sudo tee /etc/grafana-restore-lab.allow >/dev/null
+sudo chown root:root /etc/grafana-restore-lab.allow
+sudo chmod 0600 /etc/grafana-restore-lab.allow
 ```
 
-No compartas aquí el archivo `.tar.gz`: incluye la base de datos y credenciales.
+El playbook **no crea el marcador**; si no existe, se detiene.
 
-Para comprobación local opcional en Windows (solo si estás autorizado a copiar ese respaldo, **cifrado y protegido**), ejecuta desde el repo:
+## 2. Trasladar el TAR de forma segura a la VM de ensayo
 
-```powershell
-uv run --python 3.15 --no-project .\tools\verificar_backup_grafana.py `
-  --archive "C:\ruta\grafana-full-....tar.gz" `
-  --sha256 "EL_SHA256_QUE_MOSTRÓ_AWX"
+El respaldo generado el 11 de noviembre está en el **servidor original**:
+
+```text
+/home/servidor/instalacion/grafana/backups/full/grafana-full-20261111T083927Z-cfdddd9b.tar.gz
 ```
 
-## 6. Restauración controlada: ensayo en una VM aislada
+SHA256 registrado por el Job 13:
 
-**No restaurar sobre el Grafana actual.** El Job 13 es solo de backup; no incluye ninguna operación de restauración automática.
-
-En una VM *nueva y aislada* con Docker y la misma versión de Grafana:
-
-1. Instala Docker/Compose y prepara una ruta *igual que* `var_grafana_install_dir`, pero en esa VM, nunca en el servidor activo. Revisa conectividad y dependencias externas; la configuración puede hacer referencia a redes, URL y otros servicios del laboratorio original.
-2. Copia el backup por un canal autorizado **cifrado**, restringe su acceso a root y valida checksum y manifiesto con el verificador antes de extraer.
-3. Revisa el `docker-compose.yml` dentro del backup y evita exposición de puertos, conflicto de nombres y acceso accidental a producción.
-4. Restaura **solo en esa VM** con `sudo tar -xzf ... -C /ruta/de/staging`, después mueve el contenido `grafana/` a la ruta aislada prevista preservando UID/GID/permisos. Hazlo sin un Grafana en ejecución en esa VM.
-5. Asegura la red externa requerida por Compose, revisa mounts y levanta el servicio **en la VM aislada**. No cambies la imagen ni la DB en la prueba de primera restauración.
-6. Comprueba `GET /api/health` (base de datos `ok`), entrada a Grafana, inventario de dashboards (**15**) y sus **351 paneles**, usuarios, reglas de alertas, plugins y 5 datasources. Los datasources pueden no estar saludables si no se restauran sus servicios externos.
-7. Documenta fecha, tiempo de restauración, incidencias y resultado en un acta. Solo entonces se considerará *restauración verificada*.
-
-El backup es **portable bajo condiciones**, no un clon automático de todos los servicios ni un reemplazo de copias externas. La gestión de claves de cifrado debe ser independiente del servidor.
-
-## 7. Seguridad y documentación
-
-- **No introducir el `.tar.gz` ni `.sha256` en Git** (el `.sha256` identifica un respaldo sensible, aunque no sea secreto).
-- No trasladar una copia sin cifrar a un portátil personal o servicios cloud. Para transporte externo, cifrar primero con una clave pública gestionada por la organización (por ejemplo, `age`) y controlar quién puede descifrar.
-- Mantener `.md` del laboratorio actualizado al añadir el Job 13 a AWX: listado de Job Templates, ubicación/reten­ción de backups, permisos, pasos de recuperación, dependencia de Docker y SQLite.
-- No hacer limpiezas automáticas de respaldos sin política de retención aprobada. Vigilar consumo de disco; una copia con raíz en el mismo host no protege de pérdida del host.
-- **No activar todavía escrituras del Job 11**. El siguiente trabajo, una vez que el 13 pase, es practicar restauración aislada y definir la política de copias externas.
-
-## 8. Pruebas locales del paquete
-
-Con `uv` en Windows o Python del sistema:
-
-```powershell
-uv run --python 3.15 --no-project -m unittest discover -s .\tests -v
+```text
+56881e757a51df805a83f4c7d47efcc02e0ea879b111f5e11ec813bc92bc3b29
 ```
 
-Los tests no hablan con Docker ni Grafana reales: prueban archivado, SQLite online, integridad, permisos, rechazo de symlinks y validación de montajes.
+Transfiere el TAR directamente entre máquinas por un canal SSH aprobado, con acceso de lectura mediante `sudo` en el servidor y permisos privados en la VM nueva. **No lo subas a Git, a ChatGPT ni a almacenamiento externo sin cifrado.** El archivo contiene secretos y usuarios de Grafana.
+
+Ejemplo ilustrativo **desde el servidor original**, suponiendo que SSH por clave ya funciona hacia la VM de ensayo; sustituye `RESTORE_USER` y `RESTORE_VM_IP` por los reales:
+
+```bash
+sudo -v
+sudo cat /home/servidor/instalacion/grafana/backups/full/grafana-full-20261111T083927Z-cfdddd9b.tar.gz \
+  | ssh -o BatchMode=yes RESTORE_USER@RESTORE_VM_IP \
+    'umask 077; mkdir -p "$HOME/.grafana-restore-inbox"; cat > "$HOME/.grafana-restore-inbox/grafana-full-20261111T083927Z-cfdddd9b.tar.gz"'
+```
+
+Si SSH por clave no está configurado, utiliza vuestro procedimiento autorizado de copia entre VMs. No elimines el respaldo original. Confirma en la VM de ensayo:
+
+```bash
+ls -lh "$HOME/.grafana-restore-inbox/"
+stat -c '%a %U %n' "$HOME/.grafana-restore-inbox/"*.tar.gz
+```
+
+El archivo debe tener modo `600`. Asegúrate de que la VM de ensayo es efectivamente distinta de la original.
+
+## 3. Configurar AWX
+
+- Proyecto: el mismo proyecto Git antiguo, tras commit/push/sync.
+- Job Template: **`14 - Ensayar restauración Grafana (VM aislada)`**.
+- Playbook: `monitorizacion/playbooks/ensayar_restauracion_grafana.yml`.
+- Inventario: el que tenga el grupo **`grafana-restore-lab`**; el Job debe apuntar solo a esa VM.
+- Credencial: SSH+sudo **de la VM aislada**, no hace falta credencial API de Grafana.
+- Variables del Job/grupo (ejemplo con usuario ficticio `restore`; ajustar ruta e IP reales):
+
+```yaml
+var_grafana_restore_archive: /home/restore/.grafana-restore-inbox/grafana-full-20261111T083927Z-cfdddd9b.tar.gz
+var_grafana_restore_sha256: 56881e757a51df805a83f4c7d47efcc02e0ea879b111f5e11ec813bc92bc3b29
+var_grafana_restore_source_address: 192.168.56.20  # confirmar IP REAL del servidor original
+var_grafana_restore_expected_dashboards: 15
+var_grafana_restore_apply: false
+```
+
+`var_grafana_restore_source_address` es una barrera de seguridad y **debe ser la dirección actual real** del servidor Grafana. No uses una IP de ejemplo si ha cambiado.
+
+### Ejecución A — solo lectura
+
+Con `var_grafana_restore_apply: false`, ejecutar y confirmar:
+
+```text
+SHA256 del respaldo: OK
+Modo: AUDITORIA; no se ha extraido ni restaurado ningun archivo
+PLAY RECAP: changed=0 failed=0
+```
+
+### Ejecución B — reconstrucción OFFLINE, solo en VM aislada
+
+Tras verificar la identidad del host y el resumen anterior, cambiar **solo allí**:
+
+```yaml
+var_grafana_restore_apply: true
+```
+
+Esperamos:
+
+```text
+Estado: RESTAURADO_OFFLINE
+Dashboards en SQLite: 15
+SQLite: integrity_check correcto (comprobado)
+No se ha arrancado Grafana.
+```
+
+`changed>0` es normal por los archivos creados **en la VM aislada**. La carpeta queda en `/var/lib/grafana-restore-lab/ensayo-<SHA16>/`, restringida a root. No copiarla a servicios vivos ni ejecutar el Compose del backup, porque contiene rutas y conexiones del entorno original.
+
+## 4. Qué falta después
+
+Una restauración funcional E2E en **una segunda instancia aislada**: arrancar Grafana de la **misma imagen/version** con bind mounts sobre la copia, sin conexiones a la red original ni puertos públicos; validar `/api/health`, login, 15 dashboards, 351 paneles, 5 datasources y alertas. Esa fase todavía no está implementada ni probada. El backup externo cifrado también sigue pendiente.
+
+Documentar cambios en los README y listado de Job Templates del laboratorio, política de almacenamiento y recuperación. Mantener **Job 11 bloqueado en modo auditoría**. No se ha modificado Docker Compose ni el Wazuh existente.
+
+## 5. Tests
+
+```bash
+python3 -m unittest discover -s tests -p 'test_restauracion_grafana.py' -v
+```
+
+Los tests del ensayo se han ejecutado en Linux (requieren operaciones sobre propietarios y permisos, como el playbook de destino). No requieren Docker ni Grafana reales.

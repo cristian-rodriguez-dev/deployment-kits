@@ -1,0 +1,211 @@
+---
+- name: Auditar o ensayar restauracion offline solo en una VM aislada
+  hosts: grafana-restore-lab
+  become: true
+  gather_facts: true
+  serial: 1
+
+  vars:
+    var_grafana_restore_apply_effective: "{{ var_grafana_restore_apply | default(false) | bool }}"
+    var_grafana_restore_work_root_effective: "{{ var_grafana_restore_work_root | default('/var/lib/grafana-restore-lab') }}"
+    var_grafana_restore_guard: /etc/grafana-restore-lab.allow
+    var_grafana_restore_expected_count: "{{ var_grafana_restore_expected_dashboards | default(15) | int }}"
+    var_grafana_restore_reserve: "{{ var_grafana_restore_reserve_bytes | default(536870912) | int }}"
+
+  pre_tasks:
+    - name: Identificar variables que faltan
+      ansible.builtin.set_fact:
+        var_grafana_restore_missing: >-
+          {{
+            (['var_grafana_restore_archive'] if var_grafana_restore_archive is not defined else [])
+            + (['var_grafana_restore_sha256'] if var_grafana_restore_sha256 is not defined else [])
+            + (['var_grafana_restore_source_address'] if var_grafana_restore_source_address is not defined else [])
+          }}
+      changed_when: false
+
+    - name: Rechazar configuracion incompleta y targets ambiguos
+      ansible.builtin.assert:
+        that:
+          - var_grafana_restore_missing | length == 0
+          - inventory_hostname not in (groups['grafana-servers'] | default([]))
+          - inventory_hostname != 'ansible_server'
+          - not ansible_check_mode
+        fail_msg: >-
+          Restauracion bloqueada: revise variables {{ var_grafana_restore_missing | join(', ') }},
+          inventario y host. Nunca ejecutar sobre un host Grafana productivo.
+
+    - name: Validar formato de parametros y separacion entre servidores
+      ansible.builtin.assert:
+        that:
+          - var_grafana_restore_archive is match('^/.+[.]tar[.]gz$')
+          - var_grafana_restore_sha256 is match('^[0-9a-fA-F]{64}$')
+          - var_grafana_restore_source_address | length >= 7
+          - (ansible_host | default(inventory_hostname)) != var_grafana_restore_source_address
+          - var_grafana_restore_source_address not in (ansible_facts.all_ipv4_addresses | default([]))
+          - var_grafana_restore_work_root_effective is match('^/[^\n]+$')
+          - "'..' not in var_grafana_restore_work_root_effective.split('/')"
+          - var_grafana_restore_work_root_effective != '/'
+          - var_grafana_restore_work_root_effective != '/var/lib/grafana'
+          - var_grafana_restore_work_root_effective is match('^/var/lib/grafana-restore-lab(/|$)')
+          - var_grafana_restore_expected_count | int >= 1
+          - var_grafana_restore_reserve | int >= 536870912
+        fail_msg: >-
+          Ruta, SHA256, host origen u opciones de restauracion no validos.
+          No se creara ni modificara ningun archivo.
+
+    - name: Comprobar marca de laboratorio aislado
+      ansible.builtin.stat:
+        path: "{{ var_grafana_restore_guard }}"
+      register: var_grafana_restore_marker
+      changed_when: false
+
+    - name: Exigir marca creada manualmente y protegida
+      ansible.builtin.assert:
+        that:
+          - var_grafana_restore_marker.stat.isreg | default(false)
+          - var_grafana_restore_marker.stat.pw_name | default('') == 'root'
+          - var_grafana_restore_marker.stat.mode | default('') == '0600'
+        fail_msg: >-
+          Falta la marca manual /etc/grafana-restore-lab.allow con propietario root y modo 0600.
+          Este playbook nunca crea esa autorizacion.
+
+    - name: Verificar contenido exacto de la marca de VM aislada
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -Fxq
+          - GRAFANA_RESTORE_LAB_ONLY_v1
+          - "{{ var_grafana_restore_guard }}"
+      changed_when: false
+
+    - name: Exigir que el backup exista en la VM aislada
+      ansible.builtin.stat:
+        path: "{{ var_grafana_restore_archive }}"
+      register: var_grafana_restore_archive_stat
+      changed_when: false
+
+    - name: Exigir un archivo privado sin enlaces simbolicos
+      ansible.builtin.assert:
+        that:
+          - var_grafana_restore_archive_stat.stat.isreg | default(false)
+          - not (var_grafana_restore_archive_stat.stat.islnk | default(false))
+          - var_grafana_restore_archive_stat.stat.mode | default('') == '0600'
+        fail_msg: El backup debe encontrarse en el host de ensayo, como archivo regular 0600.
+
+    - name: Detectar posible instalacion activa en el destino
+      ansible.builtin.stat:
+        path: "{{ var_grafana_restore_live_install_dir | default('/home/servidor/instalacion/grafana') }}/data/grafana.db"
+      register: var_grafana_restore_live_db
+      changed_when: false
+
+    - name: Prohibir el ensayo en un host que ya tenga datos Grafana activos
+      ansible.builtin.assert:
+        that:
+          - not var_grafana_restore_live_db.stat.exists
+        fail_msg: Se ha detectado una instalacion Grafana preexistente. Ensayo cancelado.
+
+    - name: Detectar cliente Docker opcional
+      ansible.builtin.command:
+        argv: [which, docker]
+      register: var_grafana_restore_docker_bin
+      changed_when: false
+      failed_when: false
+
+    - name: Detectar contenedores con nombre Grafana
+      ansible.builtin.command:
+        argv: [docker, ps, --quiet, --filter, name=grafana]
+      register: var_grafana_restore_running
+      changed_when: false
+      when: var_grafana_restore_docker_bin.rc == 0
+
+    - name: Exigir que la VM aislada no ejecute Grafana
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_restore_running.stdout | default('') | trim) == ''
+        fail_msg: Existe un contenedor Grafana activo. No se ensayara una restauracion aqui.
+
+  tasks:
+    - name: Comprobar SHA256 del TAR en la VM aislada
+      ansible.builtin.command:
+        argv:
+          - sha256sum
+          - "{{ var_grafana_restore_archive }}"
+      register: var_grafana_restore_sha_result
+      changed_when: false
+
+    - name: Exigir coincidencia exacta con el Job 13
+      ansible.builtin.assert:
+        that:
+          - var_grafana_restore_sha_result.stdout.split()[0] | lower == var_grafana_restore_sha256 | lower
+        fail_msg: SHA256 incorrecto. Ensayo cancelado sin extraer archivos.
+
+    - name: Mostrar resultado de AUDITORIA sin escribir en la VM
+      ansible.builtin.debug:
+        msg:
+          - "Host de ensayo: {{ inventory_hostname }}"
+          - 'SHA256 del respaldo: OK'
+          - 'Modo: AUDITORIA; no se ha extraido ni restaurado ningun archivo'
+      when: not var_grafana_restore_apply_effective
+
+    - name: Crear carpeta privada para ensayos independientes
+      ansible.builtin.file:
+        path: "{{ var_grafana_restore_work_root_effective }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: var_grafana_restore_apply_effective
+
+    - name: Instalar validador de backup del Job 13 en la VM aislada
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/verificar_backup_grafana.py"
+        dest: "{{ var_grafana_restore_work_root_effective }}/verificar_backup_grafana.py"
+        owner: root
+        group: root
+        mode: '0600'
+      when: var_grafana_restore_apply_effective
+
+    - name: Instalar ensayador offline sin arranque Docker
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/ensayar_restauracion_grafana.py"
+        dest: "{{ var_grafana_restore_work_root_effective }}/ensayar_restauracion_grafana.py"
+        owner: root
+        group: root
+        mode: '0600'
+      when: var_grafana_restore_apply_effective
+
+    - name: Reconstruir arbol privado y verificar SQLite en la VM aislada
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ var_grafana_restore_work_root_effective }}/ensayar_restauracion_grafana.py"
+          - --archive
+          - "{{ var_grafana_restore_archive }}"
+          - --sha256
+          - "{{ var_grafana_restore_sha256 }}"
+          - --work-root
+          - "{{ var_grafana_restore_work_root_effective }}"
+          - --guard
+          - "{{ var_grafana_restore_guard }}"
+          - --expect-dashboards
+          - "{{ var_grafana_restore_expected_count | string }}"
+          - --reserve-bytes
+          - "{{ var_grafana_restore_reserve | string }}"
+      register: var_grafana_restore_result
+      changed_when: >-
+        var_grafana_restore_result.rc == 0
+        and (var_grafana_restore_result.stdout | from_json).changed | bool
+      when: var_grafana_restore_apply_effective
+      diff: false
+
+    - name: Mostrar ensayo offline sin datos sensibles
+      ansible.builtin.debug:
+        msg:
+          - "Estado: {{ (var_grafana_restore_result.stdout | from_json).status }}"
+          - "Archivos reconstruidos y verificados: {{ (var_grafana_restore_result.stdout | from_json).files }}"
+          - "Dashboards en SQLite: {{ (var_grafana_restore_result.stdout | from_json).dashboards }}"
+          - "Datasources en SQLite: {{ (var_grafana_restore_result.stdout | from_json).datasources }}"
+          - "Reglas de alertas en SQLite: {{ (var_grafana_restore_result.stdout | from_json).alert_rules }}"
+          - "Destino privado: {{ (var_grafana_restore_result.stdout | from_json).location }}"
+          - 'NO se ha arrancado Grafana. No equivale a una restauracion funcional E2E.'
+      when: var_grafana_restore_apply_effective
