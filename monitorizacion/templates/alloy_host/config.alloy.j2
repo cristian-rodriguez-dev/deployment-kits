@@ -93,7 +93,7 @@ loki.relabel "host_journal" {
 loki.source.journal "host" {
   max_age = "5m"
   matches = "_SYSTEMD_UNIT=ssh.service"
-  
+
   relabel_rules = loki.relabel.host_journal.rules
 
   labels = {
@@ -113,6 +113,47 @@ loki.source.journal "host" {
 
   forward_to = [loki.write.local.receiver]
 }
+
+// ============================================================
+// FUENTES ADICIONALES - PILOTO SISTEMAS
+// ============================================================
+
+{% if var_alloy_extra_journal_enabled | default(false) | bool %}
+
+{% for item in [
+  {"name": "cron", "unit": "cron.service"},
+  {"name": "logind", "unit": "systemd-logind.service"},
+  {"name": "alloy_health", "unit": "alloy.service"}
+] %}
+
+loki.source.journal "{{ item.name }}" {
+  max_age = "5m"
+
+  matches = {{ ("_SYSTEMD_UNIT=" ~ item.unit) | to_json }}
+
+  relabel_rules = loki.relabel.host_journal.rules
+
+  labels = {
+    source      = "journal",
+    collector   = "alloy-host",
+    host        = {{ var_alloy_host_name | to_json }},
+    environment = {{ var_observability_environment | to_json }},
+
+    {% if var_alloy_department is defined %}
+    departamento = {{ var_alloy_department | to_json }},
+    {% endif %}
+
+    {% if var_alloy_inventory_name is defined %}
+    inventario = {{ var_alloy_inventory_name | to_json }},
+    {% endif %}
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+{% endfor %}
+
+{% endif %}
 
 // ============================================================
 // LOKI
