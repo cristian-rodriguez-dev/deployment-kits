@@ -1,6 +1,6 @@
 ---
 - name: Instalar y configurar Grafana Alloy en el host
-  hosts: prometheus-servers
+  hosts: "{{ var_alloy_target_hosts | default('prometheus-servers') }}"
   become: true
   gather_facts: true
 

@@ -91,17 +91,24 @@ loki.relabel "host_journal" {
 // ============================================================
 
 loki.source.journal "host" {
-  path    = "/var/log/journal"
-  max_age = "12h"
+  max_age = "5m"
 
   relabel_rules = loki.relabel.host_journal.rules
 
   labels = {
-    source      = "journal",
-    collector   = "alloy-host",
-    host        = {{ var_alloy_host_name | to_json }},
-    environment = {{ var_observability_environment | to_json }},
-  }
+  source       = "journal",
+  collector    = "alloy-host",
+  host         = {{ var_alloy_host_name | to_json }},
+  environment  = {{ var_observability_environment | to_json }},
+
+  {% if var_alloy_department is defined %}
+  departamento = {{ var_alloy_department | to_json }},
+  {% endif %}
+
+  {% if var_alloy_inventory_name is defined %}
+  inventario   = {{ var_alloy_inventory_name | to_json }},
+  {% endif %}
+}
 
   forward_to = [loki.write.local.receiver]
 }
