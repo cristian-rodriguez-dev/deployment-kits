@@ -1,0 +1,115 @@
+---
+- name: Auditar certificado HTTPS y redireccion declarada de Traefik sin cambios
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_traefik_namespace: kube-system
+    var_traefik_service_name: traefik
+    var_traefik_probe_hostname: ''
+    var_traefik_probe_timeout: 4
+    var_traefik_cert_warning_days: 30
+
+  tasks:
+    - name: Verificar parametros de auditoria
+      ansible.builtin.assert:
+        that:
+          - var_traefik_probe_timeout | int >= 1
+          - var_traefik_probe_timeout | int <= 10
+          - var_traefik_cert_warning_days | int >= 1
+          - var_traefik_cert_warning_days | int <= 365
+        fail_msg: Parametros de auditoria fuera de los limites permitidos.
+
+    - name: Confirmar disponibilidad de la API Kubernetes
+      ansible.builtin.command:
+        argv: [kubectl, --request-timeout=15s, get, --raw=/readyz]
+      register: var_traefik_https_api
+      changed_when: false
+      failed_when: false
+
+    - name: Exigir acceso a Kubernetes
+      ansible.builtin.assert:
+        that:
+          - var_traefik_https_api.rc == 0
+          - var_traefik_https_api.stdout | trim == 'ok'
+        fail_msg: No se puede consultar el cluster K3s.
+
+    - name: Leer IngressRoutes sin imprimir hosts ni rutas
+      ansible.builtin.command:
+        argv: [kubectl, --request-timeout=15s, get, ingressroutes.traefik.io, -A, -o, json]
+      register: var_traefik_https_routes
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Leer estado del Service de Traefik
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - service
+          - "{{ var_traefik_service_name }}"
+          - -n
+          - "{{ var_traefik_namespace }}"
+          - -o
+          - json
+      register: var_traefik_https_service
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Exigir que los dos recursos sean consultables
+      ansible.builtin.assert:
+        that:
+          - var_traefik_https_routes.rc == 0
+          - var_traefik_https_service.rc == 0
+          - var_traefik_https_routes.stdout | trim | length > 0
+          - var_traefik_https_service.stdout | trim | length > 0
+        fail_msg: Faltan permisos o recursos Kubernetes para la auditoria de HTTPS.
+
+    - name: Probar TLS y respuesta HTTP localmente desde ansible_server
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../scripts/auditar_https_traefik.py') }}"
+        stdin: >-
+          {{
+            {
+              'routes': (var_traefik_https_routes.stdout | from_json),
+              'service': (var_traefik_https_service.stdout | from_json),
+              'hostname': var_traefik_probe_hostname,
+              'timeout': var_traefik_probe_timeout,
+              'warn_days': var_traefik_cert_warning_days
+            } | to_json
+          }}
+      register: var_traefik_https_probe
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Exigir que el analizador haya terminado correctamente
+      ansible.builtin.assert:
+        that:
+          - var_traefik_https_probe.rc == 0
+          - var_traefik_https_probe.stdout | trim | length > 0
+        fail_msg: No se pudo ejecutar la auditoria Python. Revisar Python 3 y OpenSSL del host.
+
+    - name: Registrar solamente resultados agregados no sensibles
+      ansible.builtin.set_fact:
+        var_traefik_https_summary: "{{ var_traefik_https_probe.stdout | from_json }}"
+      no_log: true
+
+    - name: Mostrar resumen de prueba HTTPS Traefik sin datos sensibles
+      ansible.builtin.debug:
+        msg:
+          - "IngressRoutes: {{ var_traefik_https_summary.routes }}; hosts extraidos: {{ var_traefik_https_summary.route_host_count }}"
+          - "Destino de prueba: IP interna declarada por el LoadBalancer; estado: {{ var_traefik_https_summary.reason }}"
+          - "TLS: {{ var_traefik_https_summary.tls_connection }}; version: {{ var_traefik_https_summary.tls_version | default('NO EVALUADA') }}"
+          - "Certificado: {{ var_traefik_https_summary.cert_metadata }}; coincide con hostname: {{ var_traefik_https_summary.cert_hostname_matches | default('NO EVALUADO') }}"
+          - "Dias restantes: {{ var_traefik_https_summary.cert_days_remaining | default('NO EVALUADOS', true) }}; supera umbral {{ var_traefik_cert_warning_days }} dias: {{ var_traefik_https_summary.cert_valid_beyond_warning_days | default('NO EVALUADO') }}"
+          - "Confiable desde host de prueba: {{ var_traefik_https_summary.trusted_by_host }}"
+          - "HTTP HEAD / en puerto 80: {{ var_traefik_https_summary.http_status | default('NO EVALUADO', true) }}; redireccion: {{ var_traefik_https_summary.http_redirect }}"
+          - 'Modo: AUDITORIA. Sin cambios de rutas, certificados, Secrets, servicios ni charts.'
