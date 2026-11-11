@@ -1,0 +1,10 @@
+---
+# Ejemplo de variables del grupo wazuh-servers de AWX.
+# Todas son opcionales; no introduzcas contrasenas en estas variables.
+# El playbook obtiene VAR_WAZUH_ADMIN_PASSWORD de la credencial Wazuh existente.
+
+# var_geoip_indexer_port: 9200
+# var_geoip_indexer_user: admin
+# var_geoip_pipeline_id: filebeat-7.10.2-wazuh-alerts-pipeline
+# var_geoip_count_alerts: true
+# var_geoip_simulate: false

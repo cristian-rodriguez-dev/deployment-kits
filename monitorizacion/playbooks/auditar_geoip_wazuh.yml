@@ -1,0 +1,207 @@
+---
+- name: Auditar GeoIP de Wazuh Indexer sin modificar la instalacion
+  hosts: wazuh-servers
+  become: false
+  gather_facts: false
+
+  vars:
+    var_geoip_effective_port: "{{ var_geoip_indexer_port | default(9200) }}"
+    var_geoip_effective_user: "{{ var_geoip_indexer_user | default('admin') }}"
+    var_geoip_effective_pipeline: "{{ var_geoip_pipeline_id | default('filebeat-7.10.2-wazuh-alerts-pipeline') }}"
+    var_geoip_effective_simulate: "{{ var_geoip_simulate | default(false) | bool }}"
+    var_geoip_effective_count: "{{ var_geoip_count_alerts | default(true) | bool }}"
+    var_geoip_api_base: "https://127.0.0.1:{{ var_geoip_effective_port }}"
+    var_geoip_admin_password: "{{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}"
+    var_geoip_sample:
+      timestamp: '2026-11-11T09:00:00.000Z'
+      rule:
+        id: '5763'
+        level: 10
+      data:
+        srcip: 8.8.8.8
+
+  pre_tasks:
+    - name: Validar parametros publicos de la auditoria
+      ansible.builtin.assert:
+        that:
+          - (var_geoip_effective_port | string) is match('^[0-9]+$')
+          - var_geoip_effective_port | int >= 1
+          - var_geoip_effective_port | int <= 65535
+          - var_geoip_effective_user is match('^[a-zA-Z0-9._-]+$')
+          - var_geoip_effective_pipeline is match('^[a-zA-Z0-9._-]+$')
+          - var_geoip_simulate is not defined or var_geoip_simulate is boolean
+          - var_geoip_count_alerts is not defined or var_geoip_count_alerts is boolean
+        fail_msg: >-
+          Revisa var_geoip_indexer_port, var_geoip_indexer_user,
+          var_geoip_pipeline_id y las opciones de auditoria en AWX.
+        quiet: true
+
+    - name: Detectar disponibilidad de credencial sin mostrar su valor
+      ansible.builtin.set_fact:
+        var_geoip_credential_present: "{{ (var_geoip_admin_password | length) > 0 }}"
+      no_log: true
+
+    - name: Confirmar que AWX inyecta la credencial del Indexer
+      ansible.builtin.assert:
+        that:
+          - var_geoip_credential_present | bool
+        fail_msg: >-
+          Falta VAR_WAZUH_ADMIN_PASSWORD. Asigna al Job Template
+          la credencial personalizada de Wazuh utilizada por instalar_wazuh.yml.
+        quiet: true
+
+  tasks:
+    - name: Consultar disponibilidad del Indexer local
+      ansible.builtin.uri:
+        url: "{{ var_geoip_api_base }}/"
+        method: GET
+        user: "{{ var_geoip_effective_user }}"
+        password: "{{ var_geoip_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: false
+        timeout: 15
+        status_code: [200, 401, 403, 404, 502, 503]
+      register: var_geoip_indexer_probe
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Verificar acceso al Indexer sin exponer credenciales
+      ansible.builtin.assert:
+        that:
+          - var_geoip_indexer_probe.status | default(0) | int == 200
+        fail_msg: >-
+          No se puede consultar Wazuh Indexer en https://127.0.0.1:{{ var_geoip_effective_port }}
+          (HTTP {{ var_geoip_indexer_probe.status | default('sin respuesta') }}).
+          Revisa el puerto publicado y la credencial de AWX; no reinicies Wazuh.
+        quiet: true
+
+    - name: Consultar definicion actual del pipeline
+      ansible.builtin.uri:
+        url: "{{ var_geoip_api_base }}/_ingest/pipeline/{{ var_geoip_effective_pipeline }}"
+        method: GET
+        user: "{{ var_geoip_effective_user }}"
+        password: "{{ var_geoip_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: false
+        timeout: 20
+        status_code: [200, 404]
+      register: var_geoip_pipeline_read
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Confirmar existencia del pipeline usado en el laboratorio
+      ansible.builtin.assert:
+        that:
+          - var_geoip_pipeline_read.status | default(0) | int == 200
+          - var_geoip_effective_pipeline in (var_geoip_pipeline_read.json | default({}))
+        fail_msg: >-
+          No se encontro el pipeline {{ var_geoip_effective_pipeline }}
+          (HTTP {{ var_geoip_pipeline_read.status | default('sin respuesta') }}).
+          Comprueba el identificador real antes de modificar nada.
+        quiet: true
+
+    - name: Identificar procesadores GeoIP existentes sin mostrar el pipeline
+      ansible.builtin.set_fact:
+        var_geoip_pipeline_definition: "{{ var_geoip_pipeline_read.json[var_geoip_effective_pipeline] }}"
+      no_log: true
+
+    - name: Extraer reglas GeoIP del pipeline
+      ansible.builtin.set_fact:
+        var_geoip_geo_processors: >-
+          {{ (var_geoip_pipeline_definition.processors | default([]))
+             | selectattr('geoip', 'defined') | map(attribute='geoip') | list }}
+      no_log: true
+
+    - name: Identificar enriquecimiento de IP origen hacia GeoLocation
+      ansible.builtin.set_fact:
+        var_geoip_srcip_processors: >-
+          {{ var_geoip_geo_processors
+             | selectattr('field', 'equalto', 'data.srcip')
+             | selectattr('target_field', 'equalto', 'GeoLocation') | list }}
+      no_log: true
+
+    - name: Comprobar el contrato GeoIP existente
+      ansible.builtin.assert:
+        that:
+          - var_geoip_srcip_processors | length > 0
+        fail_msg: >-
+          El pipeline existe, pero no se encuentra un procesador GeoIP directo
+          desde data.srcip hacia GeoLocation. No se ha modificado nada.
+        quiet: true
+
+    - name: Consultar cuantos documentos indexados tienen coordenadas
+      ansible.builtin.uri:
+        url: "{{ var_geoip_api_base }}/wazuh-alerts-*/_count?ignore_unavailable=true&allow_no_indices=true"
+        method: POST
+        user: "{{ var_geoip_effective_user }}"
+        password: "{{ var_geoip_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          query:
+            exists:
+              field: GeoLocation.location
+        return_content: false
+        timeout: 25
+        status_code: [200, 404]
+      register: var_geoip_count_result
+      failed_when: false
+      changed_when: false
+      no_log: true
+      when: var_geoip_effective_count
+
+    - name: Simular enriquecimiento de una IP publica sin indexar datos
+      ansible.builtin.uri:
+        url: "{{ var_geoip_api_base }}/_ingest/pipeline/{{ var_geoip_effective_pipeline }}/_simulate"
+        method: POST
+        user: "{{ var_geoip_effective_user }}"
+        password: "{{ var_geoip_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          docs:
+            - _source:
+                message: "{{ var_geoip_sample | to_json }}"
+                timestamp: "{{ var_geoip_sample.timestamp }}"
+                data:
+                  srcip: "{{ var_geoip_sample.data.srcip }}"
+        return_content: false
+        timeout: 25
+        status_code: [200, 400, 403, 404]
+      register: var_geoip_sim_result
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: var_geoip_effective_simulate
+
+    - name: Confirmar que la simulacion devuelve coordenadas
+      ansible.builtin.assert:
+        that:
+          - var_geoip_sim_result.status | default(0) | int == 200
+          - var_geoip_sim_result.json.docs | default([]) | length == 1
+          - var_geoip_sim_result.json.docs[0].doc._source.GeoLocation.location is defined
+        fail_msg: >-
+          La simulacion GeoIP no ha devuelto GeoLocation.location
+          (HTTP {{ var_geoip_sim_result.status | default('sin respuesta') }}).
+          Verifica la forma del documento de Filebeat y el pipeline real.
+        quiet: true
+      when: var_geoip_effective_simulate
+
+    - name: Mostrar resumen de auditoria sin documentos ni credenciales
+      ansible.builtin.debug:
+        msg:
+          - "Indexer: OK. Pipeline: {{ var_geoip_effective_pipeline }}"
+          - "Reglas GeoIP directas: {{ var_geoip_geo_processors | length }}; data.srcip hacia GeoLocation: {{ var_geoip_srcip_processors | length }}"
+          - >-
+            Documentos indexados con GeoLocation.location:
+            {{ (var_geoip_count_result.json.count | default('sin datos'))
+               if var_geoip_effective_count and (var_geoip_count_result.status | default(0) | int == 200)
+               else 'consulta desactivada o no disponible' }}
+          - "Simulacion GeoIP: {{ 'OK' if var_geoip_effective_simulate else 'NO EJECUTADA' }}"
+          - "Modo: AUDITORIA. No se han modificado pipelines, indices, contenedores ni reglas de Wazuh."
