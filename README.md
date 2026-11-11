@@ -1,139 +1,70 @@
-# Bloque 01 — Grafana AWX v6: Job 14 (ensayo offline de restauración)
+# Bloque 02 — Wazuh GeoIP / Job 16 — Adopción protegida
 
-**Proyecto antiguo:** `deployment-kits` (Ansible/AWX). Añade un playbook nuevo y scripts de validación; NO modifica los Jobs 10–13 ni la instalación de Grafana.
+**Proyecto:** `deployment-kits` (laboratorio antiguo). Extensión incremental al Job 15. El ZIP **no** contiene pipelines exportados ni credenciales y no reemplaza archivos existentes.
 
-**Estado:** código y pruebas locales preparados. **No ejecutado en AWX ni probado con el TAR real**, porque el respaldo contiene secretos y permanece en el servidor. No representa todavía una restauración funcional completa.
+## Evidencia previa
 
-## Alcance y garantías
+Job 15 auditó correctamente `filebeat-7.10.2-wazuh-alerts-pipeline`: HTTP OK, 10 procesadores GeoIP directos, uno de `data.srcip` hacia `GeoLocation`, 22 documentos con `GeoLocation.location`; `ok=13, changed=0, failed=0`. La simulación no se ejecutó todavía.
 
-- **AUDITORÍA (predeterminado):** valida destino aislado, marca manual, ausencia de Grafana existente, presencia y SHA256 del archivo. No crea carpetas ni extrae datos.
-- **ENSAYO OFFLINE (`var_grafana_restore_apply: true`):** revalida **todo** el archivo del Job 13 (SHA256 global, manifiesto, hashes por fichero y SQLite), reconstruye su estructura y permisos en una carpeta **privada de una VM dedicada**, ejecuta `PRAGMA integrity_check` y contrasta los 15 dashboards almacenados en SQLite. Opcionalmente informa del número de datasources y reglas de alertas en la base restaurada.
-- No invoca `docker`, `docker compose`, `systemctl` para efectuar cambios; no publica puertos ni accede a los servicios de la instalación principal. Las únicas acciones Docker son lectura para comprobar que no esté ejecutándose Grafana en el destino.
-- No sobrescribe ensayos existentes: repetir con el mismo TAR comprueba los ficheros y devuelve `YA_VALIDADO` y `changed=false` para la tarea de restauración.
-- **No es todavía un ensayo E2E:** no se ha arrancado una segunda instancia, ni probado sus plugins/datasources/alertas. Eso requiere otro ensayo controlado y sin acceso a los servicios originales.
+## Qué aporta el Job 16
 
-## Archivos (rutas relativas a la raíz de `deployment-kits`)
+- Lee la definición **completa y actual** del pipeline por API `GET /_ingest/pipeline/{id}`.
+- Comprueba que conserva el procesador `data.srcip` → `GeoLocation`.
+- Calcula SHA256 de una representación JSON estable de la definición, sin mostrar contenido ni credenciales.
+- Opcionalmente simula la IP `8.8.8.8` mediante `POST .../_simulate`, sin indexar documentos.
+- Si se autoriza, guarda **únicamente en el servidor** una copia privada `root:root 0600` dentro de `/var/backups/wazuh-geoip` (`0700`); el nombre lleva la huella SHA256 para no pisar un backup anterior.
+- Si encuentra un archivo previo con ese nombre pero contenido distinto o es un enlace, aborta antes de sobrescribirlo.
+- No incluye `PUT`, `DELETE`, `docker compose` ni cambios de configuración Wazuh.
 
-```text
-monitorizacion/
-├── playbooks/ensayar_restauracion_grafana.yml
-├── files/ensayar_restauracion_grafana.py
-├── files/verificar_backup_grafana.py  # copia IDENTICA de v5; no cambia su funcionamiento
-├── examples/variables_restauracion_grafana.yml
-└── RESTAURACION_GRAFANA_AWX.md
-tests/test_restauracion_grafana.py
+**La copia del pipeline no equivale a un backup del Indexer completo.** Podría contener configuraciones internas; no copiarla a Git ni a un chat antes de revisarla y redactar secretos o metadatos sensibles.
+
+## Incorporación al proyecto
+
+Extraer en la raíz de `C:\deployment-kits` y verificar que se añaden exclusivamente:
+
+```
+monitorizacion/playbooks/adoptar_geoip_wazuh.yml
+monitorizacion/examples/variables_geoip_adopcion.yml
+monitorizacion/GEOIP_ADOPCION_AWX.md
+tests/test_geoip_adopcion.py
 ```
 
-La copia del verificador de v5 está incluida solo para hacer autocontenido este ZIP; **es byte a byte idéntica al archivo usado por el Job 13**. No sustituir por una versión distinta.
+No añadir el directorio `.git` de un ZIP antiguo ni respaldos privados. Confirmar `git status --short`, `git diff --cached --stat`; después commit, push y Project Sync en AWX.
 
-## 1. Preparar una VM de restauración, NO el servidor Grafana
+Crear Job Template **`16 - Adoptar Wazuh GeoIP`** con:
 
-Se necesita una **VM Ubuntu separada** con SSH, Python 3 y acceso de AWX por una credencial Machine con `become`. Preferiblemente host-only o red de gestión restringida, sin acceso a producción. **No usar `ansible_server`, ni ninguna VM que ya tenga Grafana.** Si no existe esa VM, no ejecutes aún el Job 14.
+- Proyecto `deployment-kits`, `monitorizacion/playbooks/adoptar_geoip_wazuh.yml`.
+- Inventario con grupo `wazuh-servers` (`ansible_server`), Machine Credential para SSH/sudo y Custom Credential Wazuh con variable de entorno `VAR_WAZUH_ADMIN_PASSWORD`.
+- Variable de grupo para ruta de respaldo si hace falta; por defecto `/var/backups/wazuh-geoip`.
 
-En AWX, añadir la VM exclusivamente al grupo `grafana-restore-lab` (nombre con guiones, como las plantillas del proyecto antiguo). No añadir el servidor original a ese grupo. La VM de ensayo necesita espacio libre para descomprimir el TAR (además de una reserva mínima de 512 MiB); el script calcula el volumen necesario según el manifiesto.
+## Secuencia
 
-En la **VM aislada**, después de verificar manualmente su identidad, crear el marcador de autorización:
-
-```bash
-printf 'GRAFANA_RESTORE_LAB_ONLY_v1\n' | sudo tee /etc/grafana-restore-lab.allow >/dev/null
-sudo chown root:root /etc/grafana-restore-lab.allow
-sudo chmod 0600 /etc/grafana-restore-lab.allow
-```
-
-El playbook **no crea el marcador**; si no existe, se detiene.
-
-## 2. Trasladar el TAR de forma segura a la VM de ensayo
-
-El respaldo generado el 11 de noviembre está en el **servidor original**:
-
-```text
-/home/servidor/instalacion/grafana/backups/full/grafana-full-20261111T083927Z-cfdddd9b.tar.gz
-```
-
-SHA256 registrado por el Job 13:
-
-```text
-56881e757a51df805a83f4c7d47efcc02e0ea879b111f5e11ec813bc92bc3b29
-```
-
-Transfiere el TAR directamente entre máquinas por un canal SSH aprobado, con acceso de lectura mediante `sudo` en el servidor y permisos privados en la VM nueva. **No lo subas a Git, a ChatGPT ni a almacenamiento externo sin cifrado.** El archivo contiene secretos y usuarios de Grafana.
-
-Ejemplo ilustrativo **desde el servidor original**, suponiendo que SSH por clave ya funciona hacia la VM de ensayo; sustituye `RESTORE_USER` y `RESTORE_VM_IP` por los reales:
-
-```bash
-sudo -v
-sudo cat /home/servidor/instalacion/grafana/backups/full/grafana-full-20261111T083927Z-cfdddd9b.tar.gz \
-  | ssh -o BatchMode=yes RESTORE_USER@RESTORE_VM_IP \
-    'umask 077; mkdir -p "$HOME/.grafana-restore-inbox"; cat > "$HOME/.grafana-restore-inbox/grafana-full-20261111T083927Z-cfdddd9b.tar.gz"'
-```
-
-Si SSH por clave no está configurado, utiliza vuestro procedimiento autorizado de copia entre VMs. No elimines el respaldo original. Confirma en la VM de ensayo:
-
-```bash
-ls -lh "$HOME/.grafana-restore-inbox/"
-stat -c '%a %U %n' "$HOME/.grafana-restore-inbox/"*.tar.gz
-```
-
-El archivo debe tener modo `600`. Asegúrate de que la VM de ensayo es efectivamente distinta de la original.
-
-## 3. Configurar AWX
-
-- Proyecto: el mismo proyecto Git antiguo, tras commit/push/sync.
-- Job Template: **`14 - Ensayar restauración Grafana (VM aislada)`**.
-- Playbook: `monitorizacion/playbooks/ensayar_restauracion_grafana.yml`.
-- Inventario: el que tenga el grupo **`grafana-restore-lab`**; el Job debe apuntar solo a esa VM.
-- Credencial: SSH+sudo **de la VM aislada**, no hace falta credencial API de Grafana.
-- Variables del Job/grupo (ejemplo con usuario ficticio `restore`; ajustar ruta e IP reales):
+**Paso 1 — Auditoría y simulación, sin escribir archivos:**
 
 ```yaml
-var_grafana_restore_archive: /home/restore/.grafana-restore-inbox/grafana-full-20261111T083927Z-cfdddd9b.tar.gz
-var_grafana_restore_sha256: 56881e757a51df805a83f4c7d47efcc02e0ea879b111f5e11ec813bc92bc3b29
-var_grafana_restore_source_address: 192.168.56.20  # confirmar IP REAL del servidor original
-var_grafana_restore_expected_dashboards: 15
-var_grafana_restore_apply: false
+var_geoip_save_snapshot: false
+var_geoip_simulate: true
 ```
 
-`var_grafana_restore_source_address` es una barrera de seguridad y **debe ser la dirección actual real** del servidor Grafana. No uses una IP de ejemplo si ha cambiado.
+Resultado esperado: `changed=0`, `failed=0`, `Simulacion: OK`, hash SHA256 visible. La simulación podría fallar si el pipeline no transforma este tipo de evento, en cuyo caso no modifica nada y revisaremos el resultado antes de continuar.
 
-### Ejecución A — solo lectura
-
-Con `var_grafana_restore_apply: false`, ejecutar y confirmar:
-
-```text
-SHA256 del respaldo: OK
-Modo: AUDITORIA; no se ha extraido ni restaurado ningun archivo
-PLAY RECAP: changed=0 failed=0
-```
-
-### Ejecución B — reconstrucción OFFLINE, solo en VM aislada
-
-Tras verificar la identidad del host y el resumen anterior, cambiar **solo allí**:
+**Paso 2 — Adopción con backup privado (una vez validado el Paso 1):**
 
 ```yaml
-var_grafana_restore_apply: true
+var_geoip_save_snapshot: true
+var_geoip_simulate: true
 ```
 
-Esperamos:
+Resultado: `changed` normalmente 2 (directorio+archivo) o 0 en ejecuciones repetidas. **No es un cambio en Wazuh**. Confirmar ruta y SHA256, sin copiar el JSON en el log.
 
-```text
-Estado: RESTAURADO_OFFLINE
-Dashboards en SQLite: 15
-SQLite: integrity_check correcto (comprobado)
-No se ha arrancado Grafana.
-```
+**Paso 3 — Repetición:** relanzar con las mismas variables; `changed=0` indica idempotencia. Si la definición remota cambia, se generará un nuevo nombre SHA; no se sobrescribe la versión anterior.
 
-`changed>0` es normal por los archivos creados **en la VM aislada**. La carpeta queda en `/var/lib/grafana-restore-lab/ensayo-<SHA16>/`, restringida a root. No copiarla a servicios vivos ni ejecutar el Compose del backup, porque contiene rutas y conexiones del entorno original.
+## Qué haremos después
 
-## 4. Qué falta después
+Una vez capturada la definición real, el futuro Job 17 definirá el contrato deseado de manera explícita, comparará contra la instantánea y propondrá diferencias. **No autorizaremos todavía sustituciones del pipeline de Filebeat** porque hay 10 procesadores GeoIP y necesitamos preservar todos los bloques, no solo el de `data.srcip`.
 
-Una restauración funcional E2E en **una segunda instancia aislada**: arrancar Grafana de la **misma imagen/version** con bind mounts sobre la copia, sin conexiones a la red original ni puertos públicos; validar `/api/health`, login, 15 dashboards, 351 paneles, 5 datasources y alertas. Esa fase todavía no está implementada ni probada. El backup externo cifrado también sigue pendiente.
+### Seguridad
 
-Documentar cambios en los README y listado de Job Templates del laboratorio, política de almacenamiento y recuperación. Mantener **Job 11 bloqueado en modo auditoría**. No se ha modificado Docker Compose ni el Wazuh existente.
+`validate_certs: false` está restringido a la conexión HTTPS local `127.0.0.1` existente en el laboratorio. Antes de producción, configurar confianza CA y validar certificados; no trasladar esta excepción indiscriminadamente.
 
-## 5. Tests
-
-```bash
-python3 -m unittest discover -s tests -p 'test_restauracion_grafana.py' -v
-```
-
-Los tests del ensayo se han ejecutado en Linux (requieren operaciones sobre propietarios y permisos, como el playbook de destino). No requieren Docker ni Grafana reales.
+No guardar valores de credenciales, JSON completos de pipelines ni logs sensibles en Git, chat o capturas.

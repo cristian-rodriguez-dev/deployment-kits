@@ -1,0 +1,256 @@
+---
+- name: Adoptar GeoIP de Wazuh sin modificar el Indexer
+  hosts: wazuh-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_geoip_effective_port: "{{ var_geoip_indexer_port | default(9200) }}"
+    var_geoip_effective_user: "{{ var_geoip_indexer_user | default('admin') }}"
+    var_geoip_effective_pipeline: "{{ var_geoip_pipeline_id | default('filebeat-7.10.2-wazuh-alerts-pipeline') }}"
+    var_geoip_effective_snapshot_dir: "{{ var_geoip_snapshot_dir | default('/var/backups/wazuh-geoip') }}"
+    var_geoip_effective_save: "{{ var_geoip_save_snapshot | default(false) | bool }}"
+    var_geoip_effective_simulate: "{{ var_geoip_simulate | default(false) | bool }}"
+    var_geoip_api_base: "https://127.0.0.1:{{ var_geoip_effective_port }}"
+    var_geoip_admin_password: "{{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}"
+
+  pre_tasks:
+    - name: Validar las opciones publicas de adopcion
+      ansible.builtin.assert:
+        that:
+          - (var_geoip_effective_port | string) is match('^[0-9]+$')
+          - var_geoip_effective_port | int >= 1
+          - var_geoip_effective_port | int <= 65535
+          - var_geoip_effective_user is match('^[a-zA-Z0-9._-]+$')
+          - var_geoip_effective_pipeline is match('^[a-zA-Z0-9._-]+$')
+          - var_geoip_snapshot_dir is not defined or var_geoip_snapshot_dir is string
+          - var_geoip_effective_snapshot_dir is match('^/[a-zA-Z0-9/_-]+$')
+          - var_geoip_effective_snapshot_dir not in ['/', '/etc', '/root', '/var', '/var/backups', '/home', '/tmp']
+          - "'..' not in var_geoip_effective_snapshot_dir.split('/')"
+          - var_geoip_save_snapshot is not defined or var_geoip_save_snapshot is boolean
+          - var_geoip_simulate is not defined or var_geoip_simulate is boolean
+        fail_msg: >-
+          Revisa los parametros publicos var_geoip_indexer_port,
+          var_geoip_indexer_user, var_geoip_pipeline_id,
+          var_geoip_snapshot_dir y las opciones booleanas.
+        quiet: true
+
+    - name: Detectar credencial sin mostrar su valor
+      ansible.builtin.set_fact:
+        var_geoip_credential_present: "{{ var_geoip_admin_password | length > 0 }}"
+      no_log: true
+
+    - name: Exigir credencial Wazuh inyectada desde AWX
+      ansible.builtin.assert:
+        that:
+          - var_geoip_credential_present | bool
+        fail_msg: >-
+          Falta VAR_WAZUH_ADMIN_PASSWORD. Asigna la credencial personalizada
+          de Wazuh al Job Template 16.
+        quiet: true
+
+  tasks:
+    - name: Consultar el pipeline existente en el Indexer
+      ansible.builtin.uri:
+        url: "{{ var_geoip_api_base }}/_ingest/pipeline/{{ var_geoip_effective_pipeline }}"
+        method: GET
+        user: "{{ var_geoip_effective_user }}"
+        password: "{{ var_geoip_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: false
+        timeout: 25
+        status_code: [200, 401, 403, 404]
+      register: var_geoip_pipeline_read
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Comprobar lectura del pipeline sin revelar su contenido
+      ansible.builtin.assert:
+        that:
+          - var_geoip_pipeline_read.status | default(0) | int == 200
+          - var_geoip_effective_pipeline in (var_geoip_pipeline_read.json | default({}))
+        fail_msg: >-
+          No se ha podido leer el pipeline {{ var_geoip_effective_pipeline }};
+          HTTP {{ var_geoip_pipeline_read.status | default('sin respuesta') }}.
+          No se ha modificado nada en Wazuh.
+        quiet: true
+
+    - name: Preparar definicion y huella sin imprimir configuraciones
+      ansible.builtin.set_fact:
+        var_geoip_pipeline_definition: "{{ var_geoip_pipeline_read.json[var_geoip_effective_pipeline] }}"
+      no_log: true
+
+    - name: Identificar procesadores GeoIP directos
+      ansible.builtin.set_fact:
+        var_geoip_geo_processors: >-
+          {{ (var_geoip_pipeline_definition.processors | default([]))
+             | selectattr('geoip', 'defined') | map(attribute='geoip') | list }}
+      no_log: true
+
+    - name: Confirmar contrato de enriquecimiento existente
+      ansible.builtin.assert:
+        that:
+          - var_geoip_pipeline_definition.processors is defined
+          - var_geoip_pipeline_definition.processors | length > 0
+          - >-
+            (var_geoip_geo_processors
+             | selectattr('field', 'equalto', 'data.srcip')
+             | selectattr('target_field', 'equalto', 'GeoLocation') | list
+             | length) > 0
+        fail_msg: >-
+          El pipeline no contiene la regla data.srcip -> GeoLocation
+          esperada. Se ha detenido sin realizar cambios.
+        quiet: true
+
+    - name: Generar representacion reproducible de la definicion
+      ansible.builtin.set_fact:
+        var_geoip_snapshot_content: "{{ (var_geoip_pipeline_definition | to_nice_json(indent=2)) ~ '\n' }}"
+      no_log: true
+
+    - name: Calcular huella SHA256 y nombre inmutable
+      ansible.builtin.set_fact:
+        var_geoip_pipeline_sha256: "{{ var_geoip_snapshot_content | hash('sha256') }}"
+      no_log: true
+
+    - name: Definir ruta del respaldo de esta version
+      ansible.builtin.set_fact:
+        var_geoip_snapshot_file: >-
+          {{ var_geoip_effective_snapshot_dir }}/{{ var_geoip_effective_pipeline }}-{{ var_geoip_pipeline_sha256[:16] }}.json
+      no_log: true
+
+    - name: Simular GeoIP sin indexar documentos
+      ansible.builtin.uri:
+        url: "{{ var_geoip_api_base }}/_ingest/pipeline/{{ var_geoip_effective_pipeline }}/_simulate"
+        method: POST
+        user: "{{ var_geoip_effective_user }}"
+        password: "{{ var_geoip_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          docs:
+            - _source:
+                data:
+                  srcip: 8.8.8.8
+                rule:
+                  id: '5763'
+                timestamp: '2026-11-11T09:00:00.000Z'
+        return_content: false
+        timeout: 25
+        status_code: [200, 400, 403, 404]
+      register: var_geoip_sim_result
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: var_geoip_effective_simulate
+
+    - name: Validar que la simulacion genera coordenadas
+      ansible.builtin.assert:
+        that:
+          - var_geoip_sim_result.status | default(0) | int == 200
+          - var_geoip_sim_result.json.docs | default([]) | length == 1
+          - var_geoip_sim_result.json.docs[0].doc._source.GeoLocation.location is defined
+        fail_msg: >-
+          La simulacion no devolvio GeoLocation.location (HTTP
+          {{ var_geoip_sim_result.status | default('sin respuesta') }}).
+          Revisa la forma del evento antes de automatizar cambios.
+        quiet: true
+      when: var_geoip_effective_simulate
+
+    - name: Revisar si ya existe el directorio de respaldo
+      ansible.builtin.stat:
+        path: "{{ var_geoip_effective_snapshot_dir }}"
+        follow: false
+      register: var_geoip_snapshot_dir_stat
+      when: var_geoip_effective_save
+
+    - name: Rechazar directorios de respaldo que sean enlaces o archivos
+      ansible.builtin.assert:
+        that:
+          - >-
+            not var_geoip_snapshot_dir_stat.stat.exists or
+            (var_geoip_snapshot_dir_stat.stat.isdir and not var_geoip_snapshot_dir_stat.stat.islnk)
+        fail_msg: >-
+          El destino del respaldo no es un directorio seguro.
+          No se ha escrito ni modificado el pipeline.
+        quiet: true
+      when: var_geoip_effective_save
+
+    - name: Preparar carpeta privada para respaldos GeoIP
+      ansible.builtin.file:
+        path: "{{ var_geoip_effective_snapshot_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: var_geoip_effective_save
+
+    - name: Comprobar si ya existe respaldo con esta huella
+      ansible.builtin.stat:
+        path: "{{ var_geoip_snapshot_file }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: var_geoip_snapshot_existing
+      when: var_geoip_effective_save
+      no_log: true
+
+    - name: Rechazar respaldos manipulados o enlaces simbolicos
+      ansible.builtin.assert:
+        that:
+          - >-
+            not var_geoip_snapshot_existing.stat.exists or
+            (var_geoip_snapshot_existing.stat.isreg
+             and not var_geoip_snapshot_existing.stat.islnk
+             and var_geoip_snapshot_existing.stat.checksum == var_geoip_pipeline_sha256)
+        fail_msg: >-
+          Ya existe un respaldo con este nombre, pero su contenido no coincide.
+          No se sobreescribira. Revisa manualmente el directorio privado.
+        quiet: true
+      when: var_geoip_effective_save
+
+    - name: Guardar una copia inmutable del pipeline actual
+      ansible.builtin.copy:
+        dest: "{{ var_geoip_snapshot_file }}"
+        content: "{{ var_geoip_snapshot_content }}"
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      when:
+        - var_geoip_effective_save
+        - not var_geoip_snapshot_existing.stat.exists
+      no_log: true
+      diff: false
+
+    - name: Confirmar integridad del respaldo generado
+      ansible.builtin.stat:
+        path: "{{ var_geoip_snapshot_file }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: var_geoip_snapshot_verify
+      when: var_geoip_effective_save
+      no_log: true
+
+    - name: Validar huella del respaldo en disco
+      ansible.builtin.assert:
+        that:
+          - var_geoip_snapshot_verify.stat.isreg
+          - not var_geoip_snapshot_verify.stat.islnk
+          - var_geoip_snapshot_verify.stat.checksum == var_geoip_pipeline_sha256
+        fail_msg: >-
+          No se ha podido verificar el respaldo local del pipeline.
+          No se ha modificado Wazuh.
+        quiet: true
+      when: var_geoip_effective_save
+
+    - name: Mostrar resultado de adopcion sin secretos
+      ansible.builtin.debug:
+        msg:
+          - "Pipeline: {{ var_geoip_effective_pipeline }}"
+          - "Procesadores GeoIP directos: {{ var_geoip_geo_processors | length }}"
+          - "SHA256 de la definicion: {{ var_geoip_pipeline_sha256 }}"
+          - "Respaldo: {{ var_geoip_snapshot_file if var_geoip_effective_save else 'NO SOLICITADO' }}"
+          - "Simulacion: {{ 'OK' if var_geoip_effective_simulate else 'NO EJECUTADA' }}"
+          - 'Modo: ADOPCION SEGURA. No se han modificado pipelines, indices, reglas ni contenedores Wazuh.'

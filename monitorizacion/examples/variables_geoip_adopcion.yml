@@ -1,0 +1,11 @@
+---
+# Variables opcionales para el Job Template 16, grupo wazuh-servers.
+# No almacenar credenciales de Wazuh en Git.
+var_geoip_indexer_port: 9200
+var_geoip_indexer_user: admin
+var_geoip_pipeline_id: filebeat-7.10.2-wazuh-alerts-pipeline
+var_geoip_snapshot_dir: /var/backups/wazuh-geoip
+# Primera ejecucion: read-only. En la segunda se autoriza solo
+# escribir la copia protegida en el filesystem; no se toca el Indexer.
+var_geoip_save_snapshot: false
+var_geoip_simulate: false
