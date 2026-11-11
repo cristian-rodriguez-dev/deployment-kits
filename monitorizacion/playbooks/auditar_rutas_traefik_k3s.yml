@@ -1,0 +1,192 @@
+---
+- name: Auditar rutas y destinos Traefik en K3s sin cambios
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_traefik_namespace: kube-system
+    var_traefik_service_name: traefik
+    var_traefik_fail_on_missing_backends: false
+    var_traefik_fail_on_no_ready_endpoints: false
+
+  tasks:
+    - name: Confirmar acceso a Kubernetes
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - --raw=/readyz
+      register: var_traefik_cluster_ready
+      changed_when: false
+      failed_when: false
+
+    - name: Exigir API Kubernetes accesible
+      ansible.builtin.assert:
+        that:
+          - var_traefik_cluster_ready.rc == 0
+          - var_traefik_cluster_ready.stdout | trim == 'ok'
+        fail_msg: No se puede consultar la API de K3s; no se ha modificado el cluster.
+
+    - name: Consultar IngressRoutes actuales sin revelar reglas de acceso
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - ingressroutes.traefik.io
+          - -A
+          - -o
+          - json
+      register: var_traefik_route_documents
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Confirmar consulta de IngressRoutes
+      ansible.builtin.assert:
+        that:
+          - var_traefik_route_documents.rc == 0
+        fail_msg: No se pueden consultar las IngressRoutes actuales o falta permiso RBAC.
+
+    - name: Consultar Servicios del cluster sin revelar direccionamiento
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - services
+          - -A
+          - -o
+          - json
+      register: var_traefik_service_documents
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Confirmar consulta de Services
+      ansible.builtin.assert:
+        that:
+          - var_traefik_service_documents.rc == 0
+        fail_msg: No se pueden consultar los servicios de K3s o falta permiso RBAC.
+
+    - name: Consultar EndpointSlices si están disponibles
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - endpointslices.discovery.k8s.io
+          - -A
+          - -o
+          - json
+      register: var_traefik_endpoint_documents
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Consultar Service Traefik sin revelar su IP
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - service
+          - "{{ var_traefik_service_name }}"
+          - -n
+          - "{{ var_traefik_namespace }}"
+          - -o
+          - json
+          - --ignore-not-found
+      register: var_traefik_frontend_document
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Confirmar consulta de Service Traefik
+      ansible.builtin.assert:
+        that:
+          - var_traefik_frontend_document.rc == 0
+        fail_msg: No se ha podido consultar el Service de Traefik.
+
+    - name: Consultar si existe HelmChartConfig Traefik sin exponer values
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - helmchartconfig
+          - "{{ var_traefik_service_name }}"
+          - -n
+          - "{{ var_traefik_namespace }}"
+          - -o
+          - name
+          - --ignore-not-found
+      register: var_traefik_helmchartconfig
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Calcular resumen agregado en el entorno AWX sin guardar archivos
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/analizar_rutas_traefik.py"
+        stdin: >-
+          {{
+            {
+              'routes': (var_traefik_route_documents.stdout | from_json),
+              'services': (var_traefik_service_documents.stdout | from_json),
+              'slices_available': var_traefik_endpoint_documents.rc == 0,
+              'slices': (var_traefik_endpoint_documents.stdout | from_json) if var_traefik_endpoint_documents.rc == 0 else {},
+              'traefik_service': (var_traefik_frontend_document.stdout | from_json) if (var_traefik_frontend_document.stdout | trim | length > 0) else {},
+              'helmchartconfig_status': 'PRESENTE' if (var_traefik_helmchartconfig.rc == 0 and (var_traefik_helmchartconfig.stdout | trim | length > 0)) else 'NO DISPONIBLE / NO ENCONTRADO'
+            } | to_json
+          }}
+      register: var_traefik_analysis_raw
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Exigir que el analizador de rutas termine correctamente
+      ansible.builtin.assert:
+        that:
+          - var_traefik_analysis_raw.rc == 0
+          - var_traefik_analysis_raw.stdout | trim | length > 0
+        fail_msg: No se ha podido analizar la configuracion; no se ha modificado K3s.
+
+    - name: Preparar resumen sin direcciones ni reglas privadas
+      ansible.builtin.set_fact:
+        var_traefik_audit_summary: "{{ var_traefik_analysis_raw.stdout | from_json }}"
+      no_log: true
+
+    - name: Mostrar resumen de rutas Traefik sin datos sensibles
+      ansible.builtin.debug:
+        msg:
+          - "IngressRoutes: {{ var_traefik_audit_summary.ingress_routes }}; reglas HTTP: {{ var_traefik_audit_summary.http_route_rules }}"
+          - "Referencias Service: {{ var_traefik_audit_summary.service_refs }}; existentes y con puerto valido: {{ var_traefik_audit_summary.service_refs_valid }}; inexistentes: {{ var_traefik_audit_summary.service_refs_missing }}; puertos no encontrados: {{ var_traefik_audit_summary.service_refs_port_missing }}"
+          - "Backends Service sin endpoints listos: {{ var_traefik_audit_summary.service_refs_without_ready_endpoints }}; comprobacion de endpoints no disponible/no aplicable: {{ var_traefik_audit_summary.service_refs_endpoints_not_checked }}"
+          - "TraefikService no evaluados: {{ var_traefik_audit_summary.traefik_service_refs_not_checked }}; otros backends no evaluados: {{ var_traefik_audit_summary.other_backend_refs_not_checked }}"
+          - "IngressRoutes con TLS configurado: {{ var_traefik_audit_summary.routes_using_tls }}; reglas con middleware: {{ var_traefik_audit_summary.routes_with_middlewares }}; IngressRoutes sin entryPoints explicitos: {{ var_traefik_audit_summary.routes_without_explicit_entrypoints }}"
+          - "Traefik Service: {{ var_traefik_audit_summary.service_type }}; puertos: {{ var_traefik_audit_summary.service_ports | join(', ') if var_traefik_audit_summary.service_ports | length > 0 else 'N/D' }}"
+          - "EndpointSlices consultables: {{ var_traefik_audit_summary.endpointslices_available }}; HelmChartConfig: {{ var_traefik_audit_summary.helmchartconfig_status }}"
+          - 'Modo: AUDITORIA. Sin cambios en K3s, Traefik, rutas, certificados ni servicios.'
+
+    - name: Exigir backends coherentes solo si se solicita
+      ansible.builtin.assert:
+        that:
+          - var_traefik_audit_summary.backend_references_consistent | bool
+        fail_msg: Se han detectado referencias Service inexistentes o puertos no encontrados.
+      when: var_traefik_fail_on_missing_backends | bool
+
+    - name: Exigir endpoints disponibles solo si se solicita
+      ansible.builtin.assert:
+        that:
+          - var_traefik_audit_summary.endpointslices_available | bool
+          - var_traefik_audit_summary.service_refs_without_ready_endpoints | int == 0
+          - var_traefik_audit_summary.service_refs_endpoints_not_checked | int == 0
+        fail_msg: Existen backends sin endpoints listos o no se ha podido comprobarlos.
+      when: var_traefik_fail_on_no_ready_endpoints | bool
