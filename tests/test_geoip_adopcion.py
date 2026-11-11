@@ -52,6 +52,17 @@ class GeoipAdopcionTests(unittest.TestCase):
         self.assertIn("mode: '0600'", self.text)
         self.assertIn("mode: '0700'", self.text)
 
+    def test_simulation_matches_wazuh_message_json(self):
+        self.assertIn("message: \"{{ var_geoip_sample_alert | to_json }}\"", self.text)
+        self.assertIn("srcip: '8.8.8.8'", self.text)
+        self.assertNotIn('''            - _source:\n                data:\n                  srcip: 8.8.8.8''', self.text)
+
+    def test_simulation_diagnostic_exposes_no_document(self):
+        diagnostic = next(t for t in self.tasks if t['name'] == 'Mostrar diagnostico de simulacion sin datos sensibles')
+        self.assertNotIn('var_geoip_sim_source }}', str(diagnostic))
+        self.assertNotIn('var_geoip_sim_result.json }}', str(diagnostic))
+        self.assertIn('Error de procesamiento', str(diagnostic))
+
     def test_default_audit(self):
         self.assertIn('var_geoip_save_snapshot | default(false) | bool', self.text)
         self.assertIn('var_geoip_simulate | default(false) | bool', self.text)

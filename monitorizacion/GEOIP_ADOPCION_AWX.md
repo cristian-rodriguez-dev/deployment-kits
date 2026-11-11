@@ -46,7 +46,7 @@ var_geoip_save_snapshot: false
 var_geoip_simulate: true
 ```
 
-Resultado esperado: `changed=0`, `failed=0`, `Simulacion: OK`, hash SHA256 visible. La simulación podría fallar si el pipeline no transforma este tipo de evento, en cuyo caso no modifica nada y revisaremos el resultado antes de continuar.
+Resultado esperado: `changed=0`, `failed=0`, `Simulacion: OK`, hash SHA256 visible. La simulación podría fallar si los procesadores reales no transforman el evento sintético aunque incluya `message` JSON, en cuyo caso no modifica nada y revisaremos el resultado antes de continuar.
 
 **Paso 2 — Adopción con backup privado (una vez validado el Paso 1):**
 

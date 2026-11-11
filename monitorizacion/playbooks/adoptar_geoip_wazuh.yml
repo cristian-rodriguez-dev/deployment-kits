@@ -13,6 +13,14 @@
     var_geoip_effective_simulate: "{{ var_geoip_simulate | default(false) | bool }}"
     var_geoip_api_base: "https://127.0.0.1:{{ var_geoip_effective_port }}"
     var_geoip_admin_password: "{{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}"
+    # El ingest de Wazuh decodifica primero message como JSON y lo agrega a _source.
+    var_geoip_sample_alert:
+      timestamp: '2026-11-11T09:00:00.000Z'
+      rule:
+        id: '5763'
+        level: 10
+      data:
+        srcip: '8.8.8.8'
 
   pre_tasks:
     - name: Validar las opciones publicas de adopcion
@@ -132,11 +140,7 @@
         body:
           docs:
             - _source:
-                data:
-                  srcip: 8.8.8.8
-                rule:
-                  id: '5763'
-                timestamp: '2026-11-11T09:00:00.000Z'
+                message: "{{ var_geoip_sample_alert | to_json }}"
         return_content: false
         timeout: 25
         status_code: [200, 400, 403, 404]
@@ -146,16 +150,40 @@
       no_log: true
       when: var_geoip_effective_simulate
 
+    - name: Extraer resultado de prueba sin publicar el documento
+      ansible.builtin.set_fact:
+        var_geoip_sim_first: "{{ (var_geoip_sim_result.json.docs | default([]) | first) | default({}) }}"
+      no_log: true
+      when: var_geoip_effective_simulate
+
+    - name: Identificar datos retornados de la simulacion
+      ansible.builtin.set_fact:
+        var_geoip_sim_source: "{{ (var_geoip_sim_first.doc | default({}))._source | default({}) }}"
+        var_geoip_sim_error_type: "{{ (var_geoip_sim_first.error | default({})).type | default('ninguno') }}"
+      no_log: true
+      when: var_geoip_effective_simulate
+
+    - name: Mostrar diagnostico de simulacion sin datos sensibles
+      ansible.builtin.debug:
+        msg:
+          - "HTTP: {{ var_geoip_sim_result.status | default('sin respuesta') }}"
+          - "Documento procesado: {{ var_geoip_sim_first.doc is defined }}"
+          - "Error de procesamiento: {{ var_geoip_sim_error_type }}"
+          - "Campo data.srcip presente: {{ (var_geoip_sim_source.data | default({})).srcip is defined }}"
+          - "GeoLocation.location presente: {{ (var_geoip_sim_source.GeoLocation | default({})).location is defined }}"
+      when: var_geoip_effective_simulate
+
     - name: Validar que la simulacion genera coordenadas
       ansible.builtin.assert:
         that:
           - var_geoip_sim_result.status | default(0) | int == 200
           - var_geoip_sim_result.json.docs | default([]) | length == 1
-          - var_geoip_sim_result.json.docs[0].doc._source.GeoLocation.location is defined
+          - (var_geoip_sim_source.GeoLocation | default({})).location is defined
         fail_msg: >-
           La simulacion no devolvio GeoLocation.location (HTTP
           {{ var_geoip_sim_result.status | default('sin respuesta') }}).
-          Revisa la forma del evento antes de automatizar cambios.
+          Revisa el diagnostico anterior (error del procesador o falta de GeoLocation).
+          No se ha modificado el pipeline.
         quiet: true
       when: var_geoip_effective_simulate
 
