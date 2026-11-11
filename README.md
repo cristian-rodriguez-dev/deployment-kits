@@ -1,40 +1,23 @@
-# Bloque 02 · Wazuh GeoIP AWX — v4 (corrección de la verificación del snapshot)
+# Bloque 02 — Wazuh GeoIP AWX v5 · Auditoría de deriva (Job 17)
 
-**Objetivo:** reparar exclusivamente la verificación del respaldo del Job 16. No modificar el Indexer, sus pipelines ni el resto de playbooks.
+Se añade un **playbook nuevo** y reutilizable. No modifica los Jobs 15/16 que ya han sido probados; no introduce escrituras en el Indexer.
 
-## Problema corregido
+## Archivos nuevos
 
-El Job 16 con `var_geoip_save_snapshot: true` falló al comparar la huella de la representación JSON en memoria con la del archivo escrito por `ansible.builtin.copy(content=...)`. El fichero podía ser JSON equivalente aunque la serialización de bytes no coincidiera. **No se considera validado hasta leerlo de vuelta y comprobarlo.**
+- `monitorizacion/playbooks/auditar_deriva_geoip_wazuh.yml`
+- `monitorizacion/examples/variables_geoip_deriva.yml`
+- `monitorizacion/GEOIP_DERIVA_AWX.md`
+- `tests/test_geoip_deriva.py` (pruebas estáticas opcionales)
 
-Esta revisión no asume que la diferencia sea inocua. Ahora:
+## Ejecución
 
-1. Comprueba que el destino, si existe, es un fichero regular privado (`root:root`, modo `0600`, límite 512 KiB), nunca un enlace simbólico.
-2. Conserva el archivo anterior; `force: false` y sin operaciones destructivas.
-3. Lee el fichero real con `ansible.builtin.slurp` (con `no_log`).
-4. Lo interpreta como JSON y exige equivalencia de toda la definición con la recibida del Indexer, no solo de la regla `data.srcip`.
-5. Calcula un SHA256 SHA-256 **de los bytes reales del archivo** mediante `stat` y muestra ese valor y el identificador/hash lógico de la representación por separado.
-6. Rechaza un JSON alterado, inválido o de otra definición. No oculta un desacuerdo de contenido bajo el argumento de que puede haber espacios distintos.
+1. Extraer en la raíz de `C:\deployment-kits`, conservando las rutas; revisar `git status` y `git diff`.
+2. Revisar cuidadosamente la ruta del snapshot en `monitorizacion/examples/variables_geoip_deriva.yml`. El valor es la ruta **esperada por defecto**, no una ruta confirmada por acceso a tu servidor.
+3. Hacer commit y push de los archivos del bloque, sincronizar el Project de AWX.
+4. Crear Job Template `17 - Auditar deriva GeoIP` con el playbook nuevo, mismo inventario y credenciales del Job 16.
+5. Pegar las 3 variables del ejemplo en Extra Variables, ajustando la ruta cuando proceda.
+6. Ejecutar y enviar solo `Mostrar resultado de comparacion sin contenidos ni credenciales` y `PLAY RECAP`.
 
-Si la lectura `from_json` falla por JSON inválido, la tarea fallará sin mostrar el contenido sensible y sin modificar el archivo.
+**Seguridad:** lee API y snapshot privado, compara JSON, no crea ni modifica ningún archivo, no ejecuta PUT/POST/DELETE, no cambia OpenSearch/Wazuh. En modo por defecto `var_geoip_fail_on_drift: false` informa sobre deriva sin marcar failed, para revisar manualmente.
 
-## Uso
-
-Extrae el paquete en la raíz de `C:\deployment-kits`, revisa `git diff`, haz commit/push y sincroniza el Project de AWX.
-
-En el Job Template 16 utiliza:
-
-```yaml
-var_geoip_save_snapshot: true
-var_geoip_simulate: true
-```
-
-### Resultados esperados
-
-- `JSON del respaldo: IDENTICO al pipeline del Indexer`.
-- Dos huellas SHA256 (representación y bytes reales). Pueden coincidir o no; no equipararlas.
-- `failed=0`, con `changed=0` si el archivo ya existe y es válido.
-- Wazuh sin cambios: el único archivo es el snapshot privado `/var/backups/wazuh-geoip/...`.
-
-**Si la comparación estructural falla, no borres ni reescribas el fichero**: necesitaremos comprobar el resultado sin mostrar JSON ni credenciales.
-
-No envíes el snapshot ni credenciales al chat o a Git. El respaldo no sustituye a copias externas ni incluye el resto de datos del Indexer.
+**IMPORTANTE:** No subir el snapshot privado de GeoIP al repositorio. Su hash SHA256 del archivo es `f7adde...`, diferente del hash SHA256 de representación `8a24ed...`. Los dos son correctos pero no intercambiables.

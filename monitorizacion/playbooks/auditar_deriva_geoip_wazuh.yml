@@ -1,0 +1,167 @@
+---
+- name: Auditar deriva del pipeline GeoIP de Wazuh frente a un snapshot verificado
+  hosts: wazuh-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_geoip_effective_port: "{{ var_geoip_indexer_port | default(9200) }}"
+    var_geoip_effective_user: "{{ var_geoip_indexer_user | default('admin') }}"
+    var_geoip_effective_pipeline: "{{ var_geoip_pipeline_id | default('filebeat-7.10.2-wazuh-alerts-pipeline') }}"
+    var_geoip_effective_fail_on_drift: "{{ var_geoip_fail_on_drift | default(false) | bool }}"
+    var_geoip_api_base: "https://127.0.0.1:{{ var_geoip_effective_port }}"
+    var_geoip_admin_password: "{{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}"
+
+  pre_tasks:
+    - name: Validar parametros publicos y referencia explicita
+      ansible.builtin.assert:
+        that:
+          - (var_geoip_effective_port | string) is match('^[0-9]+$')
+          - var_geoip_effective_port | int >= 1
+          - var_geoip_effective_port | int <= 65535
+          - var_geoip_effective_user is match('^[a-zA-Z0-9._-]+$')
+          - var_geoip_effective_pipeline is match('^[a-zA-Z0-9._-]+$')
+          - var_geoip_reference_file is defined
+          - var_geoip_reference_file is string
+          - var_geoip_reference_file is match('^/[a-zA-Z0-9/_.-]+\\.json$')
+          - "'..' not in var_geoip_reference_file.split('/')"
+          - var_geoip_reference_sha256 is defined
+          - var_geoip_reference_sha256 is string
+          - var_geoip_reference_sha256 is match('^[0-9a-f]{64}$')
+          - var_geoip_fail_on_drift is not defined or var_geoip_fail_on_drift is boolean
+        fail_msg: >-
+          Configura var_geoip_reference_file (ruta absoluta del snapshot creado
+          por el Job 16) y var_geoip_reference_sha256 (SHA256 de sus bytes en
+          disco, no el de la representacion JSON). Revisa tambien puerto,
+          usuario, pipeline y el booleano opcional var_geoip_fail_on_drift.
+        quiet: true
+
+    - name: Detectar la credencial AWX sin revelar su valor
+      ansible.builtin.set_fact:
+        var_geoip_credential_present: "{{ var_geoip_admin_password | length > 0 }}"
+      no_log: true
+
+    - name: Exigir credencial de Indexer inyectada desde AWX
+      ansible.builtin.assert:
+        that:
+          - var_geoip_credential_present | bool
+        fail_msg: >-
+          Falta VAR_WAZUH_ADMIN_PASSWORD. Asigna la misma credencial de
+          Wazuh Indexer utilizada en los Jobs 15 y 16.
+        quiet: true
+
+  tasks:
+    - name: Revisar el respaldo de referencia sin seguir enlaces
+      ansible.builtin.stat:
+        path: "{{ var_geoip_reference_file }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: var_geoip_reference_stat
+      changed_when: false
+      no_log: true
+
+    - name: Exigir respaldo privado e inalterado
+      ansible.builtin.assert:
+        that:
+          - var_geoip_reference_stat.stat.exists | default(false)
+          - var_geoip_reference_stat.stat.isreg | default(false)
+          - not (var_geoip_reference_stat.stat.islnk | default(false))
+          - var_geoip_reference_stat.stat.uid | default(-1) == 0
+          - var_geoip_reference_stat.stat.mode | default('') == '0600'
+          - var_geoip_reference_stat.stat.size | default(0) >= 2
+          - var_geoip_reference_stat.stat.size | default(0) <= 524288
+          - var_geoip_reference_stat.stat.checksum | default('') == var_geoip_reference_sha256
+        fail_msg: >-
+          El snapshot no existe, no cumple las protecciones o su SHA256 de
+          disco no coincide. No se compara contra una referencia no fiable.
+          Ninguna configuracion de Wazuh ha cambiado.
+        quiet: true
+
+    - name: Leer el snapshot validado sin mostrar su definicion
+      ansible.builtin.slurp:
+        src: "{{ var_geoip_reference_file }}"
+      register: var_geoip_reference_read
+      no_log: true
+
+    - name: Interpretar referencia JSON completa
+      ansible.builtin.set_fact:
+        var_geoip_reference_definition: "{{ var_geoip_reference_read.content | b64decode | from_json }}"
+      no_log: true
+
+    - name: Consultar la definicion actual del pipeline
+      ansible.builtin.uri:
+        url: "{{ var_geoip_api_base }}/_ingest/pipeline/{{ var_geoip_effective_pipeline }}"
+        method: GET
+        user: "{{ var_geoip_effective_user }}"
+        password: "{{ var_geoip_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        use_proxy: false
+        return_content: false
+        status_code: [200, 401, 403, 404]
+        timeout: 25
+      register: var_geoip_current_read
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Verificar acceso al pipeline sin imprimir respuesta
+      ansible.builtin.assert:
+        that:
+          - var_geoip_current_read.status | default(0) | int == 200
+          - var_geoip_effective_pipeline in (var_geoip_current_read.json | default({}))
+        fail_msg: >-
+          No se ha podido leer el pipeline {{ var_geoip_effective_pipeline }};
+          HTTP {{ var_geoip_current_read.status | default('sin respuesta') }}.
+          Wazuh no se ha modificado.
+        quiet: true
+
+    - name: Comparar definiciones completas sin depender de espacios ni orden de claves
+      ansible.builtin.set_fact:
+        var_geoip_current_definition: "{{ var_geoip_current_read.json[var_geoip_effective_pipeline] }}"
+        var_geoip_definitions_equal: >-
+          {{ var_geoip_reference_definition ==
+             var_geoip_current_read.json[var_geoip_effective_pipeline] }}
+      no_log: true
+
+    - name: Comprobar estructura base del snapshot
+      ansible.builtin.assert:
+        that:
+          - var_geoip_reference_definition is mapping
+          - var_geoip_reference_definition.processors is defined
+          - var_geoip_reference_definition.processors is sequence
+          - var_geoip_reference_definition.processors | length > 0
+        fail_msg: >-
+          El snapshot es JSON valido pero no tiene una definicion de pipeline
+          con procesadores. No se han realizado cambios.
+        quiet: true
+
+    - name: Contar procesadores GeoIP actuales y de referencia
+      ansible.builtin.set_fact:
+        var_geoip_reference_processors: >-
+          {{ (var_geoip_reference_definition.processors | default([]))
+             | selectattr('geoip', 'defined') | list }}
+        var_geoip_current_processors: >-
+          {{ (var_geoip_current_definition.processors | default([]))
+             | selectattr('geoip', 'defined') | list }}
+      no_log: true
+
+    - name: Mostrar resultado de comparacion sin contenidos ni credenciales
+      ansible.builtin.debug:
+        msg:
+          - "Pipeline: {{ var_geoip_effective_pipeline }}"
+          - "Referencia SHA256 (bytes): {{ var_geoip_reference_stat.stat.checksum }}"
+          - "Procesadores GeoIP en referencia: {{ var_geoip_reference_processors | length }}"
+          - "Procesadores GeoIP actuales: {{ var_geoip_current_processors | length }}"
+          - "Comparacion estructural: {{ 'SIN CAMBIOS' if var_geoip_definitions_equal | bool else 'DERIVA DETECTADA' }}"
+          - 'Solo auditoria: sin escrituras, sin actualizaciones y sin reinicios de Wazuh.'
+
+    - name: Fallar solamente si se ha pedido tratar la deriva como error
+      ansible.builtin.assert:
+        that:
+          - var_geoip_definitions_equal | bool
+        fail_msg: >-
+          DERIVA DETECTADA: el pipeline actual difiere del snapshot verificado.
+          No se ha corregido automaticamente. Revisar antes de autorizar cambios.
+        quiet: true
+      when: var_geoip_effective_fail_on_drift

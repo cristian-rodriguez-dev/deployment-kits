@@ -1,0 +1,7 @@
+---
+# Ejemplo no sensible para las Extra Variables del Job 17.
+# COMPRUEBA la ruta real publicada por la ultima tarea del Job 16.
+# NO utilices el hash de representacion para verificar bytes del respaldo.
+var_geoip_reference_file: '/var/backups/wazuh-geoip/filebeat-7.10.2-wazuh-alerts-pipeline-8a24edf01dabfd0.json'
+var_geoip_reference_sha256: 'f7addeaade50b77ed2d13f9ca953cb5ce2f379ce1fc226c91dd666c42dfa3e8c'
+var_geoip_fail_on_drift: false
