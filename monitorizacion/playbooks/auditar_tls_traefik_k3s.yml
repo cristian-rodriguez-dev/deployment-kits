@@ -1,0 +1,131 @@
+---
+- name: Auditar TLS y exposicion declarada de Traefik sin cambios
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_traefik_namespace: kube-system
+    var_traefik_service_name: traefik
+    var_traefik_fail_on_invalid_tls_secrets: false
+
+  tasks:
+    - name: Confirmar disponibilidad de la API Kubernetes
+      ansible.builtin.command:
+        argv: [kubectl, --request-timeout=15s, get, --raw=/readyz]
+      register: var_traefik_tls_api_status
+      changed_when: false
+      failed_when: false
+
+    - name: Exigir API Kubernetes disponible
+      ansible.builtin.assert:
+        that:
+          - var_traefik_tls_api_status.rc == 0
+          - var_traefik_tls_api_status.stdout | trim == 'ok'
+        fail_msg: No se puede consultar la API Kubernetes. No se ha modificado Traefik.
+
+    - name: Consultar IngressRoutes Traefik sin exponer sus reglas
+      ansible.builtin.command:
+        argv: [kubectl, --request-timeout=15s, get, ingressroutes.traefik.io, -A, -o, json]
+      register: var_traefik_tls_routes_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Exigir lectura de las IngressRoutes
+      ansible.builtin.assert:
+        that:
+          - var_traefik_tls_routes_raw.rc == 0
+        fail_msg: No es posible consultar las IngressRoutes por API o RBAC.
+
+    - name: Consultar Service frontal de Traefik
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - service
+          - "{{ var_traefik_service_name }}"
+          - -n
+          - "{{ var_traefik_namespace }}"
+          - -o
+          - json
+          - --ignore-not-found
+      register: var_traefik_tls_service_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Exigir lectura del Service de Traefik
+      ansible.builtin.assert:
+        that:
+          - var_traefik_tls_service_raw.rc == 0
+          - var_traefik_tls_service_raw.stdout | trim | length > 0
+        fail_msg: No se ha podido leer el Service Traefik.
+
+    - name: Consultar solo metadatos de Secrets sin leer certificados ni claves
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=15s
+          - get
+          - secrets
+          - -A
+          - -o
+          - 'jsonpath={range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.type}{"\n"}{end}'
+      register: var_traefik_tls_secrets_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Calcular resumen de seguridad en entorno AWX sin persistir recursos
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/analizar_tls_traefik.py"
+        stdin: >-
+          {{
+            {
+              'routes': (var_traefik_tls_routes_raw.stdout | from_json),
+              'traefik_service': (var_traefik_tls_service_raw.stdout | from_json),
+              'secret_metadata_available': (var_traefik_tls_secrets_raw.rc == 0),
+              'secret_metadata': (var_traefik_tls_secrets_raw.stdout if var_traefik_tls_secrets_raw.rc == 0 else '')
+            } | to_json
+          }}
+      register: var_traefik_tls_analysis_raw
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Exigir analisis correcto sin mostrar metadatos
+      ansible.builtin.assert:
+        that:
+          - var_traefik_tls_analysis_raw.rc == 0
+          - var_traefik_tls_analysis_raw.stdout | trim | length > 0
+        fail_msg: No se ha podido analizar la configuracion; no se ha modificado K3s.
+
+    - name: Preparar resumen agregado no sensible
+      ansible.builtin.set_fact:
+        var_traefik_tls_summary: "{{ var_traefik_tls_analysis_raw.stdout | from_json }}"
+      no_log: true
+
+    - name: Mostrar resumen de seguridad TLS Traefik sin datos sensibles
+      ansible.builtin.debug:
+        msg:
+          - "IngressRoutes: {{ var_traefik_tls_summary.routes }}; TLS configurado: {{ var_traefik_tls_summary.routes_with_tls }}; sin TLS declarado: {{ var_traefik_tls_summary.routes_without_tls }}"
+          - "Mecanismos TLS: Secret explicito {{ var_traefik_tls_summary.tls_explicit_secret }}, certResolver {{ var_traefik_tls_summary.tls_cert_resolver }}, certificado predeterminado/u otro {{ var_traefik_tls_summary.tls_default_or_other }} (pueden coexistir)"
+          - "Referencias TLS Secret: validas por existencia y tipo {{ var_traefik_tls_summary.tls_secrets_found_correct_type }}, ausentes {{ var_traefik_tls_summary.tls_secrets_missing }}, tipo incorrecto {{ var_traefik_tls_summary.tls_secrets_wrong_type }}, no verificables {{ var_traefik_tls_summary.tls_secrets_unchecked }}"
+          - "Metadatos de Secrets consultables: {{ var_traefik_tls_summary.secret_metadata_accessible }}; TLSOptions referenciadas: {{ var_traefik_tls_summary.tls_options_references }}; rutas con middlewares: {{ var_traefik_tls_summary.routes_with_middlewares }}"
+          - "Service frontal: {{ var_traefik_tls_summary.service_type }}; puertos: {{ var_traefik_tls_summary.service_ports | join(', ') if var_traefik_tls_summary.service_ports | length > 0 else 'N/D' }}"
+          - "Direcciones declaradas para LoadBalancer: {{ var_traefik_tls_summary.service_loadbalancer_address_count }}; IP global {{ var_traefik_tls_summary.service_loadbalancer_global_ip }}; IP privada/no global {{ var_traefik_tls_summary.service_loadbalancer_private_or_nonglobal }}; hostname u otro {{ var_traefik_tls_summary.service_loadbalancer_hostname }}"
+          - 'Certificado presentado, caducidad, alcance real desde Internet y redireccion HTTP a HTTPS: NO COMPROBADOS.'
+          - 'Modo: AUDITORIA; sin cambios de rutas, Secrets, certificados, charts ni contenedores.'
+
+    - name: Exigir consistencia de referencias TLS Secret solo bajo solicitud expresa
+      ansible.builtin.assert:
+        that:
+          - var_traefik_tls_summary.tls_secret_references_consistent | bool
+        fail_msg: Hay secretos TLS inexistentes, de tipo incorrecto o no verificables.
+      when: var_traefik_fail_on_invalid_tls_secrets | bool
