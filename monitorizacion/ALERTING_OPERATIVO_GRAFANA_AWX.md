@@ -59,3 +59,23 @@ La auditoría usa exclusivamente `GET` de la API Grafana, aunque Ansible **crea/
 - El test de Telegram + email ha demostrado el envío real. Futuras pruebas deben evitar interrupciones adicionales en laboratorio de trabajo sin necesidad.
 
 **Principio de seguridad:** observar y validar antes de automatizar escrituras. No ejecutar scripts de creación para "corregir" una deriva detectada.
+
+## Corrección de la comparación PromQL — v2
+
+La primera ejecución del Job 27 detectó `DRIFT_awx-k3s-crashloop` únicamente en
+`promql`, mientras las otras cuatro reglas, ruta directa y contactos eran correctos.
+El comparador v1 comparaba texto con `strip()` y consideraba distintas dos
+consultas equivalentes si Grafana reformateaba saltos de línea o espacios.
+
+La versión v2 compara **tokens PromQL** y conserva intactos los contenidos
+de cadenas entrecomilladas. Es más tolerante con la presentación, sin
+ignorar cambios de funciones, nombres de métricas, etiquetas, operadores o
+valores numéricos. **No es una prueba de equivalencia semántica general**.
+
+Repetir Job 27 después de sincronizar el proyecto: si indica `OK`, la
+diferencia se debía únicamente al formato; si mantiene `DRIFT` en `promql`,
+existe otra diferencia que debe inspeccionarse y aprobarse antes de cambiar
+Git o Grafana. No ejecutar Jobs 25/26 en `apply` para reparar esta auditoría.
+
+La corrección modifica solo el auditor y sus pruebas/documentación; no
+cambia alertas, credenciales, SMTP, contactos ni el Job 05.

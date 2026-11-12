@@ -8,6 +8,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -49,9 +50,25 @@ class GrafanaReadOnlyClient:
             raise AuditError("API_INVALID_JSON") from None
 
 
+# Compare PromQL tokens, not presentation whitespace. Grafana's editor may
+# reformat a correct expression on save (including newlines / indentation).
+# Quoted and raw string literals stay intact, including interior whitespace.
+# Token boundaries ensure `sum by` is never mistaken for `sumby`.
+_PROMQL_TOKEN = re.compile(
+    r'"(?:\\.|[^"\\])*"|'
+    r"'(?:\\.|[^'\\])*'|"
+    r'`[^`]*`|'
+    r'[A-Za-z_:][A-Za-z0-9_:]*|'
+    r'\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|'
+    r'!=|=~|!~|==|<=|>=|'
+    r'[^\s]'
+)
+
+
 def norm_expr(text):
-    # Preserve internal whitespace, which can be meaningful inside strings.
-    return text.strip() if isinstance(text, str) else None
+    if not isinstance(text, str):
+        return None
+    return tuple(_PROMQL_TOKEN.findall(text))
 
 
 def validate_rule(actual, spec):

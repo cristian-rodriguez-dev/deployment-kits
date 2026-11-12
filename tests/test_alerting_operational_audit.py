@@ -68,6 +68,34 @@ class Tests(unittest.TestCase):
         r = auditor.audit(c)
         self.assertIn("promql", r["details"][1]["fields"])
 
+    def test_promql_multiline_formatting_is_not_drift(self):
+        c = Client()
+        c.rules[1]["data"][0]["model"]["expr"] = (
+            'max by (namespace, pod, container) (\n'
+            '  kube_pod_container_status_waiting_reason{\n'
+            '    reason="CrashLoopBackOff"\n'
+            '  }\n'
+            ') or vector(0)'
+        )
+        self.assertEqual(auditor.audit(c)["state"], "OK")
+
+    def test_promql_drift_keeps_literal_spaces_and_expression_tokens(self):
+        expected = 'sum(rate(metric{reason="Has Spaces"}[5m]))'
+        formatted = 'sum ( rate ( metric { reason = "Has Spaces" } [5m] ) )'
+        wrong_literal = 'sum(rate(metric{reason="HasSpaces"}[5m]))'
+        wrong_operator = 'sum(rate(metric{reason="Has Spaces"}[10m]))'
+        self.assertEqual(auditor.norm_expr(expected), auditor.norm_expr(formatted))
+        self.assertNotEqual(auditor.norm_expr(expected), auditor.norm_expr(wrong_literal))
+        self.assertNotEqual(auditor.norm_expr(expected), auditor.norm_expr(wrong_operator))
+        self.assertNotEqual(auditor.norm_expr('sum by (job) (up)'), auditor.norm_expr('sumby(job)(up)'))
+
+    def test_promql_semantic_change_still_detected(self):
+        c = Client()
+        c.rules[1]["data"][0]["model"]["expr"] = (
+            'sum(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}) or vector(0)'
+        )
+        self.assertIn("promql", auditor.audit(c)["details"][1]["fields"])
+
     def test_invalid_threshold(self):
         c = Client()
         c.rules[2]["data"][1]["model"]["conditions"][0]["evaluator"]["params"] = [1]
