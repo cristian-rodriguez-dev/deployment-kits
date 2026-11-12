@@ -1,5 +1,5 @@
 ---
-- name: Instalar Grafana y configurar Prometheus
+- name: Instalar Grafana limpio o inspeccionar una instalacion existente
   hosts: grafana-servers
   become: true
   gather_facts: true
@@ -37,6 +37,104 @@
         fail_msg: >-
           Faltan variables de Grafana.
           Configúralas en el grupo grafana-servers del inventario de AWX.
+
+    # La protección se evalúa antes de apt, archivos, redes, plantilla y Compose.
+    # La instalación existente NO se gestiona ni adopta desde este instalador.
+    - name: Validar modo seguro del Job 05
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_job05_mode | default('install')) in ['inspect', 'install']
+        fail_msg: "Usa var_grafana_job05_mode: inspect o install."
+
+    - name: Detectar Compose ya existente
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir }}/docker-compose.yml"
+      register: var_grafana_existing_compose
+
+    - name: Detectar base de datos existente
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir }}/data/grafana.db"
+      register: var_grafana_existing_database
+
+    - name: Detectar archivo de variables privado
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir }}/.env"
+      register: var_grafana_existing_env
+
+    - name: Inspeccionar presencia declarada de SMTP sin exponer configuracion
+      ansible.builtin.slurp:
+        src: "{{ var_grafana_install_dir }}/docker-compose.yml"
+      register: var_grafana_existing_compose_bytes
+      when:
+        - (var_grafana_job05_mode | default('install')) == 'inspect'
+        - var_grafana_existing_compose.stat.exists
+      no_log: true
+
+    - name: Informar del estado protegido sin modificaciones
+      ansible.builtin.debug:
+        msg:
+          - "Modo: INSPECT; solo lectura; no se instalara ni reiniciara Grafana"
+          - "Compose existente: {{ var_grafana_existing_compose.stat.exists }}"
+          - "Base de datos existente: {{ var_grafana_existing_database.stat.exists }}"
+          - "Archivo .env existente: {{ var_grafana_existing_env.stat.exists }}"
+          - >-
+            SMTP declarado en Compose:
+            {{ 'GF_SMTP_ENABLED' in
+               (var_grafana_existing_compose_bytes.content | default('') | b64decode) }}
+          - "Sin alteraciones de volumenes, alertas, secretos ni contenedores"
+      when: (var_grafana_job05_mode | default('install')) == 'inspect'
+
+    - name: Terminar inspeccion sin ejecutar tareas de despliegue
+      ansible.builtin.meta: end_play
+      when: (var_grafana_job05_mode | default('install')) == 'inspect'
+
+    - name: Bloquear sobreescritura de instalaciones operativas
+      ansible.builtin.assert:
+        that:
+          - not var_grafana_existing_compose.stat.exists
+          - not var_grafana_existing_database.stat.exists
+        fail_msg: >-
+          Job 05 en modo INSTALL permite solo instalaciones limpias.
+          Ya hay un Compose o una base de datos en la ruta objetivo.
+          Para no perder SMTP ni configuraciones locales, no se hara ningun cambio.
+          Ejecuta modo inspect o prepara un procedimiento separado de adopcion.
+
+    - name: Exigir .env protegido para instalacion limpia con SMTP
+      ansible.builtin.assert:
+        that:
+          - var_grafana_existing_env.stat.exists
+          - var_grafana_existing_env.stat.isreg | default(false)
+        fail_msg: >-
+          SMTP habilitado: crea un .env privado con GRAFANA_SMTP_HOST,
+          GRAFANA_SMTP_USER, GRAFANA_SMTP_PASSWORD y
+          GRAFANA_SMTP_FROM_ADDRESS antes del despliegue.
+      when: var_grafana_smtp_enabled | default(false) | bool
+
+    - name: Comprobar claves SMTP sin revelar sus valores
+      ansible.builtin.slurp:
+        src: "{{ var_grafana_install_dir }}/.env"
+      register: var_grafana_smtp_env_bytes
+      when: var_grafana_smtp_enabled | default(false) | bool
+      no_log: true
+
+    - name: Rechazar credenciales SMTP ausentes o vacias
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((var_grafana_smtp_env_bytes.content | b64decode)
+            | regex_search('(?m)^GRAFANA_SMTP_HOST=[^\r\n]+$')) is not none
+          - >-
+            ((var_grafana_smtp_env_bytes.content | b64decode)
+            | regex_search('(?m)^GRAFANA_SMTP_USER=[^\r\n]+$')) is not none
+          - >-
+            ((var_grafana_smtp_env_bytes.content | b64decode)
+            | regex_search('(?m)^GRAFANA_SMTP_PASSWORD=[^\r\n]+$')) is not none
+          - >-
+            ((var_grafana_smtp_env_bytes.content | b64decode)
+            | regex_search('(?m)^GRAFANA_SMTP_FROM_ADDRESS=[^\r\n]+$')) is not none
+        fail_msg: "Faltan claves SMTP o estan vacias en el .env privado."
+      when: var_grafana_smtp_enabled | default(false) | bool
+      no_log: true
 
     - name: Comprobar sistema operativo
       ansible.builtin.assert:
@@ -225,6 +323,9 @@
         backup: true
         validate: >-
           docker compose
+          {% if var_grafana_smtp_enabled | default(false) | bool %}
+          --env-file {{ var_grafana_install_dir }}/.env
+          {% endif %}
           --project-name {{ var_grafana_project_name }}
           -f %s config --quiet
       no_log: true

@@ -13,6 +13,16 @@ services:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
+{% if var_grafana_smtp_enabled | default(false) | bool %}
+      # Credenciales desde el .env privado, nunca desde Git/AWX extra vars.
+      GF_SMTP_ENABLED: "true"
+      GF_SMTP_HOST: "${GRAFANA_SMTP_HOST}"
+      GF_SMTP_USER: "${GRAFANA_SMTP_USER}"
+      GF_SMTP_PASSWORD: "${GRAFANA_SMTP_PASSWORD}"
+      GF_SMTP_FROM_ADDRESS: "${GRAFANA_SMTP_FROM_ADDRESS}"
+      GF_SMTP_FROM_NAME: "Infraestructura - Emergencias"
+      GF_SMTP_SKIP_VERIFY: "false"
+{% endif %}
 
     volumes:
       - "{{ var_grafana_install_dir }}/data:/var/lib/grafana"

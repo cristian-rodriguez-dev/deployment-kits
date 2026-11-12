@@ -14,3 +14,12 @@
 
 # La contraseña se proporciona mediante la credencial de AWX.
 # VAR_GRAFANA_ADMIN_PASSWORD
+# GUARDAS JOB 05 (v1)
+# Por defecto: install => solo instalacion limpia; falla si ya hay Compose o grafana.db.
+# Para revisar la instalacion actual sin modificarla:
+# var_grafana_job05_mode: inspect
+# En una VM nueva, con los prechecks superados:
+# var_grafana_job05_mode: install
+# Para generar un Compose con SMTP en una VM nueva (requiere .env privado previo):
+# var_grafana_smtp_enabled: true
+# Nunca introducir GRAFANA_SMTP_PASSWORD en este YAML o en Git.

@@ -1,28 +1,27 @@
-# Bloque 07 — Corrección v2 de la comparación de PromQL (Job 27)
+# Bloque 08 — Protección del Job 05 (Grafana legado)
 
-**Motivo:** Job 27 detectó un `DRIFT` únicamente en `awx-k3s-crashloop/promql`.
-El comparador v1 distinguía texto multilínea y texto de una línea aunque los
-operadores y tokens fuesen idénticos. La versión v2 tokeniza la expresión,
-ignorando espacios de formato, pero **no** cambios reales de contenido.
+**Objetivo**: impedir que el instalador original sobrescriba por accidente el Compose SMTP o la DB/alertas de Grafana ya operativo. Este paquete **NO despliega ni modifica nada en el servidor**.
 
-## Archivos
+## Archivos incluidos
 
-- `monitorizacion/files/grafana_alerting_operational_audit.py`: reemplaza
-  únicamente la comparación de expresiones en la auditoría.
-- `tests/test_alerting_operational_audit.py`: añade tres pruebas de no-deriva
-  por formato y deriva verdadera por modificación de la consulta.
-- `monitorizacion/ALERTING_OPERATIVO_GRAFANA_AWX.md`: documenta la corrección.
+- `monitorizacion/playbooks/instalar_grafana.yml`: preflight estricto: `inspect` de solo lectura; `install` exclusivamente para instalaciones limpias. En ambos modos el control se ejecuta **antes** de las tareas con escrituras. Conserva el resto del instalador original.
+- `monitorizacion/templates/grafana/docker-compose.yml.j2`: soporte SMTP opcional en instalaciones nuevas, con referencias a `.env` privado (sin valores de contraseñas en Git).
+- `monitorizacion/examples/variables_grafana.yml`: modos documentados.
+- `monitorizacion/PROTECCION_GRAFANA_JOB05.md`: procedimiento, límites y validación.
+- `tests/test_grafana_job05_guard.py`: regresión estática + render Jinja/YAML.
 
-## Aplicación
+## Aplicación al repositorio `deployment-kits`
 
-1. Extraer en la raíz de `C:\deployment-kits`.
-2. Probar: `uv run --python 3.15 --no-project -m unittest discover -s tests -p test_alerting_operational_audit.py -v`.
-3. Revisar `git diff --check`, hacer commit y push; sincronizar proyecto en AWX.
-4. Repetir **Job 27** sin cambiar sus Extra Variables.
-5. Si `Resultado: OK`, se ha descartado una falsa deriva causada por formato.
-   Si continúa `DRIFT` en `promql`, no hacer escrituras: investigar la diferencia
-   real antes de actualizar la referencia declarativa.
+1. Antes de sustituir, revisar `git diff` contra los archivos actuales. Esta entrega se elaboró contra `deployment-kits.zip` facilitado anteriormente. Si Job 05 cambió desde entonces, **fusionar las modificaciones en vez de sobrescribirlas**.
+2. Copiar los archivos respetando rutas. No añadir `.env`, secretos, backups, `.git`, ni `__pycache__` al commit.
+3. Ejecutar `python -m unittest discover -s tests -p test_grafana_job05_guard.py -v` (requiere PyYAML y Jinja2) y `git diff --check`.
+4. Commit / push / sincronizar **el proyecto AWX**.
+5. **En el Grafana operativo**, ejecutar Job 05 **solo** con `var_grafana_job05_mode: inspect`. Debe terminar tras reportar Compose, DB, `.env` y SMTP; no reiniciar servicios.
 
-No se cambia el playbook ni se realizan peticiones de escritura a Grafana.
-No ejecutar el instalador de Grafana Job 05: su Compose histórico no incluye SMTP.
-No versionar `.env`, contraseñas, ficheros de secretos ni respaldos privados.
+## Comportamiento / limitaciones
+
+- `var_grafana_job05_mode: inspect`: lectura, `meta: end_play`, ninguna escritura; no se comprueban credenciales SMTP ni se muestra contenido.
+- `var_grafana_job05_mode: install` (por defecto): falla **antes de cambios** si existe `docker-compose.yml` o `data/grafana.db`. Esto modifica deliberadamente la semántica de reejecución del instalador legado. El objetivo es protección prioritaria; no proporciona adopción ni actualización de un Grafana existente.
+- Solo para nueva VM, `var_grafana_smtp_enabled: true` habilita valores `${GRAFANA_SMTP_*}` (host, usuario, contraseña y remitente), siempre cargados desde `${var_grafana_install_dir}/.env`. Nunca enviar las credenciales por Extra Variables, Git o logs.
+- Este parche no migra la instalación antigua al estado plenamente declarativo, no cambia Grafana existente y no cubre restauración. Una futura gestión de un Grafana existente necesita un bloque de adopción separado, con copia validada y aprobación explícita.
+- No ejecutar Job 05 en modo `install` sobre el servidor que ya contiene 10 reglas y SMTP funcional. No ejecutar un flujo AWX que fuerce ese modo hasta revisar el workflow.
