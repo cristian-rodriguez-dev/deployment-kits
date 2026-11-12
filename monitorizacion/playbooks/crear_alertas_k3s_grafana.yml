@@ -1,0 +1,92 @@
+---
+- name: Preparar dos alertas K3s en Grafana sin modificar las existentes
+  hosts: grafana-servers
+  gather_facts: false
+  become: true
+
+  vars:
+    var_grafana_k3s_mode_effective: "{{ var_grafana_k3s_mode | default('plan') }}"
+    var_grafana_k3s_admin_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+    var_grafana_k3s_tool_path: "{{ var_grafana_install_dir }}/.grafana_k3s_alerts_awx.py"
+
+  pre_tasks:
+    - name: Exigir variables de Grafana
+      ansible.builtin.assert:
+        that:
+          - var_grafana_install_dir is defined
+          - var_grafana_port is defined
+          - var_grafana_admin_user is defined
+          - var_grafana_k3s_admin_password | length > 0
+        fail_msg: Faltan variables de Grafana o la credencial VAR_GRAFANA_ADMIN_PASSWORD.
+      no_log: true
+
+    - name: Validar modo y protecciones
+      ansible.builtin.assert:
+        that:
+          - var_grafana_k3s_mode_effective in ['plan', 'apply']
+          - var_grafana_install_dir is match('^/[^\n]+$')
+          - var_grafana_install_dir != '/'
+          - "'..' not in var_grafana_install_dir.split('/')"
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - var_grafana_port | int >= 1
+          - var_grafana_port | int <= 65535
+          - var_grafana_k3s_mode_effective != 'apply' or (var_grafana_k3s_confirm | default('')) == 'CREATE_PAUSED_ONLY'
+          - not ansible_check_mode
+        fail_msg: Modo o variables invalidas. Apply exige var_grafana_k3s_confirm=CREATE_PAUSED_ONLY.
+
+  tasks:
+    - name: Copiar herramienta local sin imprimir credenciales ni diferencias
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/grafana_k3s_rules.py"
+        dest: "{{ var_grafana_k3s_tool_path }}"
+        owner: root
+        group: root
+        mode: '0700'
+      diff: false
+
+    - name: Ejecutar plan o creacion exclusivamente pausada
+      block:
+        - name: Consultar Grafana y Prometheus con credenciales protegidas
+          ansible.builtin.command:
+            argv:
+              - python3
+              - "{{ var_grafana_k3s_tool_path }}"
+              - --mode
+              - "{{ var_grafana_k3s_mode_effective }}"
+              - --port
+              - "{{ var_grafana_port | string }}"
+              - --confirm
+              - "{{ var_grafana_k3s_confirm | default('') }}"
+          environment:
+            GRAFANA_ALERTING_USERNAME: "{{ var_grafana_admin_user }}"
+            GRAFANA_ALERTING_PASSWORD: "{{ var_grafana_k3s_admin_password }}"
+          register: var_grafana_k3s_result_raw
+          no_log: true
+          changed_when: >-
+            var_grafana_k3s_mode_effective == 'apply' and
+            (var_grafana_k3s_result_raw.stdout | from_json).created_paused | int > 0
+          diff: false
+      rescue:
+        - name: Cancelar sin exponer secretos ni respuestas de API
+          ansible.builtin.fail:
+            msg: >-
+              No se pudo ejecutar la preparacion de alertas. Comprobar credenciales,
+              disponibilidad de las metricas K3s en Prometheus y que exista
+              la regla Host Down - Sistemas y Devs. No se actualizan reglas existentes.
+
+    - name: Parsear resumen no sensible
+      ansible.builtin.set_fact:
+        var_grafana_k3s_report: "{{ var_grafana_k3s_result_raw.stdout | from_json }}"
+      no_log: true
+      changed_when: false
+
+    - name: Mostrar resultado de reglas K3s
+      ansible.builtin.debug:
+        msg:
+          - "Modo: {{ var_grafana_k3s_report.mode }}"
+          - "Metricas K3s requeridas: {{ var_grafana_k3s_report.metrics }}"
+          - "Regla existente de referencia: {{ var_grafana_k3s_report.anchor }}"
+          - "Reglas iguales ya existentes: {{ var_grafana_k3s_report.existing }}"
+          - "Reglas nuevas pendientes: {{ var_grafana_k3s_report.pending }}"
+          - "Reglas nuevas creadas y pausadas: {{ var_grafana_k3s_report.created_paused }}"
+          - "Modificacion de reglas existentes: NO. Politicas/contact points: SIN CAMBIOS."

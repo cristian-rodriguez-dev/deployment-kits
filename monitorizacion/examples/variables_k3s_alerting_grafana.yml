@@ -1,0 +1,6 @@
+---
+# Extra Vars de AWX: primera ejecucion
+var_grafana_k3s_mode: plan
+# Tras revisar el plan, una creacion explicita y pausada:
+# var_grafana_k3s_mode: apply
+# var_grafana_k3s_confirm: CREATE_PAUSED_ONLY
