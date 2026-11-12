@@ -42,7 +42,7 @@
       - >-
         not (_wazuh_ar_script_stat.stat.exists | bool) or
         _wazuh_ar_script_stat.stat.checksum ==
-          (lookup('file', role_path ~ '/files/ssh-block-pilot.py') | hash('sha1')) or
+          (lookup('ansible.builtin.file', role_path ~ '/files/ssh-block-pilot.py', rstrip=False) | hash('sha1')) or
         (var_wazuh_ar_migrate_existing | bool)
     fail_msg: >-
       El script existente difiere. Para migrarlo haz backup y aprueba
