@@ -1,0 +1,153 @@
+---
+- name: Respaldar o comparar alerting Grafana sin modificar recursos
+  hosts: grafana-servers
+  gather_facts: false
+  become: true
+
+  vars:
+    var_grafana_alerting_mode_effective: "{{ var_grafana_alerting_mode | default('capture') }}"
+    var_grafana_alerting_dir_effective: "{{ var_grafana_alerting_backup_dir | default(var_grafana_install_dir ~ '/backups/alerting') }}"
+    var_grafana_alerting_admin_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+
+  pre_tasks:
+    - name: Identificar variables no definidas sin revelar credenciales
+      ansible.builtin.set_fact:
+        var_grafana_alerting_missing: >-
+          {{
+            (['var_grafana_install_dir'] if var_grafana_install_dir is not defined else [])
+            + (['var_grafana_port'] if var_grafana_port is not defined else [])
+            + (['var_grafana_admin_user'] if var_grafana_admin_user is not defined else [])
+            + (['VAR_GRAFANA_ADMIN_PASSWORD'] if not var_grafana_alerting_admin_password else [])
+          }}
+      changed_when: false
+      no_log: true
+
+    - name: Exigir configuracion minima del grupo AWX
+      ansible.builtin.assert:
+        that:
+          - var_grafana_alerting_missing | length == 0
+          - not ansible_check_mode
+        fail_msg: >-
+          Faltan variables o se activo check mode. Revisa var_grafana_install_dir,
+          var_grafana_port, var_grafana_admin_user y la credencial
+          VAR_GRAFANA_ADMIN_PASSWORD. No pegues secretos en Extra Variables.
+
+    - name: Validar modo, ruta y referencia antes de ejecutar
+      ansible.builtin.assert:
+        that:
+          - var_grafana_alerting_mode_effective in ['capture', 'compare']
+          - var_grafana_install_dir is match('^/[^\n]+$')
+          - var_grafana_install_dir != '/'
+          - var_grafana_alerting_dir_effective is match('^/[^\n]+$')
+          - var_grafana_alerting_dir_effective != '/'
+          - "'..' not in var_grafana_alerting_dir_effective.split('/')"
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - var_grafana_port | int >= 1
+          - var_grafana_port | int <= 65535
+          - var_grafana_admin_user | string | trim | length > 0
+          - >-
+            var_grafana_alerting_mode_effective == 'capture'
+            or (
+              (var_grafana_alerting_reference_file | default('') | length) > 0
+              and (var_grafana_alerting_reference_sha256 | default('')) is match('^[0-9a-f]{64}$')
+            )
+        fail_msg: >-
+          Configuracion de alerting invalida. En compare son obligatorios
+          var_grafana_alerting_reference_file y var_grafana_alerting_reference_sha256.
+
+  tasks:
+    - name: Comprobar salud de Grafana
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ var_grafana_port }}/api/health"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: var_grafana_alerting_health
+      changed_when: false
+
+    - name: Exigir base de datos saludable
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_alerting_health.json | default({})).get('database') == 'ok'
+        fail_msg: Grafana no devuelve database=ok; operacion cancelada.
+
+    - name: Crear directorio de respaldos privados
+      ansible.builtin.file:
+        path: "{{ var_grafana_alerting_dir_effective }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Colocar herramienta de exportacion de solo lectura
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/grafana_alerting_snapshot.py"
+        dest: "{{ var_grafana_alerting_dir_effective }}/.grafana_alerting_snapshot.py"
+        owner: root
+        group: root
+        mode: '0700'
+        diff: false
+
+    - name: Consultar la API con proteccion de secretos
+      block:
+          - name: Capturar o comparar alerting mediante GET sin imprimir contenidos
+            ansible.builtin.command:
+              argv:
+                - python3
+                - "{{ var_grafana_alerting_dir_effective }}/.grafana_alerting_snapshot.py"
+                - --mode
+                - "{{ var_grafana_alerting_mode_effective }}"
+                - --port
+                - "{{ var_grafana_port | string }}"
+                - --backup-dir
+                - "{{ var_grafana_alerting_dir_effective }}"
+                - --baseline
+                - "{{ var_grafana_alerting_reference_file | default('') }}"
+                - --sha256
+                - "{{ var_grafana_alerting_reference_sha256 | default('') }}"
+            environment:
+              GRAFANA_ALERTING_USERNAME: "{{ var_grafana_admin_user }}"
+              GRAFANA_ALERTING_PASSWORD: "{{ var_grafana_alerting_admin_password }}"
+            register: var_grafana_alerting_execute
+            changed_when: var_grafana_alerting_mode_effective == 'capture'
+            diff: false
+            no_log: true
+      rescue:
+        - name: Comunicar error de API sin mostrar credenciales ni respuestas
+          ansible.builtin.fail:
+            msg: >-
+              {{
+                (
+                  ansible_failed_result.stderr | default('')
+                  | regex_search('ERROR SEGURO: (?:Endpoint [a-z_]+: HTTP [0-9]{3}|No se pudo conectar a Grafana al consultar [a-z_]+|Respuesta no JSON de endpoint [a-z_]+|Respuesta excesiva en endpoint [a-z_]+)')
+                ) | default('No se pudo completar la lectura. Comprueba credenciales, permisos y versiones de la API de alerting.', true)
+              }}
+    - name: Convertir salida segura a resumen
+      ansible.builtin.set_fact:
+        var_grafana_alerting_report: "{{ var_grafana_alerting_execute.stdout | from_json }}"
+      changed_when: false
+      no_log: true
+
+    - name: Mostrar inventario sin contenidos ni credenciales
+      ansible.builtin.debug:
+        msg:
+          - "Modo: {{ var_grafana_alerting_report.mode }}; estado: {{ var_grafana_alerting_report.status }}"
+          - "Reglas: {{ var_grafana_alerting_report.categories.alert_rules.count | default('NO DISPONIBLE') }}"
+          - "Contact points: {{ var_grafana_alerting_report.categories.contact_points.count | default('NO DISPONIBLE') }}"
+          - "Politicas: {{ var_grafana_alerting_report.categories.policies.count | default('NO DISPONIBLE') }} arbol(es)"
+          - "Mute timings: {{ var_grafana_alerting_report.categories.mute_timings.count | default('NO DISPONIBLE') }}"
+          - "Templates: {{ var_grafana_alerting_report.categories.templates.count | default('NO DISPONIBLE') }}"
+          - "Export API (rules/contact-points/policies/mute): {{ var_grafana_alerting_report.categories.alert_rules_export.state }} / {{ var_grafana_alerting_report.categories.contact_points_export.state }} / {{ var_grafana_alerting_report.categories.policies_export.state }} / {{ var_grafana_alerting_report.categories.mute_timings_export.state }}"
+          - "Categorias con deriva: {{ var_grafana_alerting_report.changed_categories | default([]) | join(', ') | default('ninguna', true) }}"
+          - "Respaldo privado: {{ var_grafana_alerting_report.snapshot | default('NO SOLICITADO') }}"
+          - "SHA256 bytes: {{ var_grafana_alerting_report.sha256_bytes | default('NO APLICA') }}"
+          - "Modo sin escrituras sobre Grafana: {{ var_grafana_alerting_report.grafana_writes == 0 }}"
+
+    - name: Tratar la deriva como fallo solo bajo autorizacion
+      ansible.builtin.assert:
+        that:
+          - var_grafana_alerting_report.changed_count | default(0) | int == 0
+        fail_msg: Se detectaron cambios respecto al snapshot privado; no se modifico Grafana.
+      when:
+        - var_grafana_alerting_mode_effective == 'compare'
+        - var_grafana_alerting_fail_on_drift | default(false) | bool

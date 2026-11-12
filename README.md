@@ -1,23 +1,26 @@
-# Bloque 02 — Wazuh GeoIP AWX v5 · Auditoría de deriva (Job 17)
+# Bloque 05 — Grafana Alerting AWX v1
 
-Se añade un **playbook nuevo** y reutilizable. No modifica los Jobs 15/16 que ya han sido probados; no introduce escrituras en el Indexer.
+**Objeto:** un Job 23 que guarda la configuración de alerting existente en un snapshot protegido, y puede compararla con el estado posterior, sin modificar Grafana.
 
-## Archivos nuevos
+## Instalación
 
-- `monitorizacion/playbooks/auditar_deriva_geoip_wazuh.yml`
-- `monitorizacion/examples/variables_geoip_deriva.yml`
-- `monitorizacion/GEOIP_DERIVA_AWX.md`
-- `tests/test_geoip_deriva.py` (pruebas estáticas opcionales)
+1. Incorporar las carpetas `monitorizacion/` y `tests/` de este ZIP a la **raíz** de `deployment-kits`.
+2. Revisar Git (`git status --short`, `git diff`); comprobar que no se han incluido backups, secretos ni `.env`.
+3. Ejecutar los tests (`uv run --python 3.15 --no-project -m unittest discover -s tests -p test_grafana_alerting.py -v`).
+4. Hacer commit, push y sincronizar el proyecto en AWX.
+5. Crear `23 - Respaldar y comparar alerting Grafana` con `monitorizacion/playbooks/gestionar_alerting_grafana.yml`.
+6. Reutilizar las credenciales e inventario del Job 10. Extra Vars:
 
-## Ejecución
+```yaml
+var_grafana_alerting_mode: capture
+```
 
-1. Extraer en la raíz de `C:\deployment-kits`, conservando las rutas; revisar `git status` y `git diff`.
-2. Revisar cuidadosamente la ruta del snapshot en `monitorizacion/examples/variables_geoip_deriva.yml`. El valor es la ruta **esperada por defecto**, no una ruta confirmada por acceso a tu servidor.
-3. Hacer commit y push de los archivos del bloque, sincronizar el Project de AWX.
-4. Crear Job Template `17 - Auditar deriva GeoIP` con el playbook nuevo, mismo inventario y credenciales del Job 16.
-5. Pegar las 3 variables del ejemplo en Extra Variables, ajustando la ruta cuando proceda.
-6. Ejecutar y enviar solo `Mostrar resultado de comparacion sin contenidos ni credenciales` y `PLAY RECAP`.
+7. Ejecutar una vez. Copiar solamente la tarea **Mostrar inventario sin contenidos ni credenciales** y el `PLAY RECAP`.
 
-**Seguridad:** lee API y snapshot privado, compara JSON, no crea ni modifica ningún archivo, no ejecuta PUT/POST/DELETE, no cambia OpenSearch/Wazuh. En modo por defecto `var_geoip_fail_on_drift: false` informa sobre deriva sin marcar failed, para revisar manualmente.
+La ejecución generará una captura sensible con permisos privados en el servidor. **No enviar aquí ese archivo y no subirlo a Git**.
 
-**IMPORTANTE:** No subir el snapshot privado de GeoIP al repositorio. Su hash SHA256 del archivo es `f7adde...`, diferente del hash SHA256 de representación `8a24ed...`. Los dos son correctos pero no intercambiables.
+## Qué NO hace
+
+Este Job **no** aprovisiona reglas ni contact points ni cambia notificaciones, y tampoco habilita modo de escritura. No reemplaza el Job 13 de backup integral, ni comprueba que un correo o mensaje Telegram sea entregado. El despliegue declarativo será la siguiente fase, una vez comprobado el inventario real.
+
+Más detalles: `monitorizacion/ALERTING_GRAFANA_AWX.md`.

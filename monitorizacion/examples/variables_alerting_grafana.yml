@@ -1,0 +1,16 @@
+---
+# Ejemplo para Job 23, NO incluir secretos en inventario ni en Git.
+# Variables existentes del grupo grafana-servers:
+# var_grafana_install_dir: /ruta/real/instalacion/grafana
+# var_grafana_port: 3000
+# var_grafana_admin_user: admin
+# Credencial de AWX: VAR_GRAFANA_ADMIN_PASSWORD
+
+# Primera ejecucion, copia privada de configuracion en el servidor:
+var_grafana_alerting_mode: capture
+
+# Para comparar despues (copiar exactamente ruta y hash devueltos por capture):
+# var_grafana_alerting_mode: compare
+# var_grafana_alerting_reference_file: /ruta/real/backups/alerting/alerting-YYYYMMDDTHHMMSSZ-abcdef123456.json
+# var_grafana_alerting_reference_sha256: 'sha256-de-64-caracteres'
+# var_grafana_alerting_fail_on_drift: false
