@@ -295,10 +295,24 @@ Si además debe añadir hosts o editar sus variables, necesita los permisos de a
 
 ## Protección SSH mediante Wazuh Active Response (bloque independiente)
 
-El piloto de bloqueo reversible ya se validó manualmente en el agente `005`. Para
-**auditarlo sin modificaciones** o preparar su adopción con AWX, consultar
-[`docs/WAZUH_ACTIVE_RESPONSE.md`](docs/WAZUH_ACTIVE_RESPONSE.md).
+**Estado del piloto el 12/11/2026:** el agente Wazuh `005` (`PC_SISTEMAS_1`; host AWX `cliente_1`) está migrado al nuevo script, con firewall IPv4 y servicio systemd activos; Ansible y la plantilla individual de AWX son idempotentes (`changed=0`). El Manager continúa con `location=defined-agent`, `agent_id=005` y regla `5763`.
 
-No añadir esta función a los instaladores de agentes; usar los nuevos playbooks
-`auditar_wazuh_active_response.yml` y `configurar_wazuh_active_response_agentes.yml`.
-Primero ejecutar auditoría y una migración controlada en un único equipo.
+El workflow de agentes está configurado así:
+
+```text
+06 - Instalar Agentes
+        ↓ éxito
+07 - Configurar Agentes
+        ↓ éxito
+Aprobación manual de Active Response
+        ↓ aprobación
+23 - Wazuh AR - Despliegue (limit=cliente_1)
+```
+
+En la plantilla 23 se utiliza `configurar_wazuh_active_response_agentes.yml` con `var_wazuh_ar_agent_apply=true`, `var_wazuh_ar_migrate_existing=false`, `var_wazuh_ar_admin_networks_reviewed=true`, `var_wazuh_ar_ipv6_enabled=false` y `var_wazuh_ar_ack_ipv6_gap=true`. La ejecución individual de la plantilla funcionó; **no se ha realizado una ejecución integral del workflow modificado**.
+
+El ciclo automático completo `ADD → DELETE` del nuevo script y el fallback temporal aún no se han validado de extremo a extremo; las funciones de bloqueo, desbloqueo y token sí se probaron directamente. No ampliar la plantilla a otros agentes ni el Manager a `location=local` hasta preparar y autorizar esos equipos.
+
+No integrar esta función dentro de los instaladores de agentes: conservar los playbooks `auditar_wazuh_active_response.yml` y `configurar_wazuh_active_response_agentes.yml` separados.
+
+Para detalles técnicos, pruebas, salvaguardas y rollback consultar [`docs/WAZUH_ACTIVE_RESPONSE.md`](docs/WAZUH_ACTIVE_RESPONSE.md).
