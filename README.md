@@ -1,6 +1,8 @@
-# Bloque 05 — Grafana Alerting AWX v1
+# Bloque 05 — Grafana Alerting AWX v2
 
-**Objeto:** un Job 23 que guarda la configuración de alerting existente en un snapshot protegido, y puede compararla con el estado posterior, sin modificar Grafana.
+**Objeto:** el Job 24 que guarda la configuración de alerting existente en un snapshot protegido, y puede compararla con el estado posterior, sin modificar Grafana.
+
+**Corrección v2:** `diff: false` es una palabra clave de tarea de Ansible, no un parámetro de `ansible.builtin.copy`. Se ha movido fuera del módulo. No se modifica el exportador ni el comportamiento del respaldo.
 
 ## Instalación
 
@@ -8,7 +10,7 @@
 2. Revisar Git (`git status --short`, `git diff`); comprobar que no se han incluido backups, secretos ni `.env`.
 3. Ejecutar los tests (`uv run --python 3.15 --no-project -m unittest discover -s tests -p test_grafana_alerting.py -v`).
 4. Hacer commit, push y sincronizar el proyecto en AWX.
-5. Crear `23 - Respaldar y comparar alerting Grafana` con `monitorizacion/playbooks/gestionar_alerting_grafana.yml`.
+5. Actualizar el Job `24 - Respaldar y comparar alerting Grafana` con `monitorizacion/playbooks/gestionar_alerting_grafana.yml`.
 6. Reutilizar las credenciales e inventario del Job 10. Extra Vars:
 
 ```yaml

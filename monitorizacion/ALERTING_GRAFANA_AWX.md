@@ -1,4 +1,4 @@
-# Job 23 — Respaldo y comparación de alerting Grafana
+# Job 24 — Respaldo y comparación de alerting Grafana
 
 ## Objetivo
 
@@ -23,7 +23,7 @@ No modifica los Jobs 10–21 ni `instalar_grafana.yml`.
 
 ## Job Template en AWX
 
-- **Nombre:** `23 - Respaldar y comparar alerting Grafana`
+- **Nombre:** `24 - Respaldar y comparar alerting Grafana`
 - **Playbook:** `monitorizacion/playbooks/gestionar_alerting_grafana.yml`
 - **Inventario:** mismo que Jobs 10 y 13, con el grupo `grafana-servers`.
 - **Credencial de máquina:** SSH con sudo, la ya utilizada en el laboratorio.

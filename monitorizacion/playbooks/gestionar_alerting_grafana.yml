@@ -86,7 +86,7 @@
         owner: root
         group: root
         mode: '0700'
-        diff: false
+      diff: false
 
     - name: Consultar la API con proteccion de secretos
       block:
