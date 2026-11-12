@@ -11,7 +11,7 @@ Añade **solo** dos reglas nuevas, sin modificar las cinco existentes, su contac
 | `awx-k3s-deploy-unavail` | K3s - Deployment sin replicas disponibles | Réplicas deseadas > disponibles | 5m |
 | `awx-k3s-crashloop` | K3s - Contenedor en CrashLoopBackOff | Waiting reason = CrashLoopBackOff | 5m |
 
-La consulta de replicas utiliza `kube_deployment_spec_replicas` y `kube_deployment_status_replicas_available`. La segunda utiliza `kube_pod_container_status_waiting_reason`.
+La consulta de replicas utiliza `kube_deployment_spec_replicas` y `kube_deployment_status_replicas_available`. La segunda utiliza `kube_pod_container_status_waiting_reason` con `or vector(0)` para devolver 0 cuando no existen pods en CrashLoopBackOff, preservando las etiquetas `namespace`, `pod` y `container` de las series incidentadas.
 
 ## Instrucciones
 
@@ -28,8 +28,8 @@ La consulta de replicas utiliza `kube_deployment_spec_replicas` y `kube_deployme
 
 - No se ejecutan `PUT`, `PATCH` ni `DELETE`. Tampoco se actualizan contact points o rutas.
 - Cualquier UID o título preexistente con contenido inesperado cancela la ejecución sin sobrescribirlo.
-- Las dos reglas se crean inicialmente con `isPaused: true`.
-- `noDataState: OK` evita que una ausencia de datos dispare la regla, pero **no detecta la pérdida de kube-state-metrics**: eso debe vigilarse por separado con la alerta `up{job="kube-state-metrics"}` o una comprobación externa.
+- Las dos reglas se crean inicialmente con `isPaused: true`. **En la instancia actual del laboratorio ya se activaron manualmente, se verificaron en Normal y se respaldaron 7 reglas con el Job 24**; la reejecución del Job 25 no debe pausarlas de nuevo ni modificar la consulta.
+- `noDataState: OK` evita que una ausencia de datos dispare la regla, y `or vector(0)` cubre el caso sin CrashLoopBackOff; **no detecta la pérdida de kube-state-metrics**: eso debe vigilarse por separado con la alerta `up{job="kube-state-metrics"}` o una comprobación externa.
 - El script verifica mediante el proxy de Grafana que Prometheus contiene métricas de Deployments y Pods. Si no las encuentra, no crea reglas.
 - Crear alertas mediante la API de provisioning puede cambiar su modo de gestión frente a alertas creadas desde UI. El header `X-Disable-Provenance` se utiliza para intentar conservar la edición por UI; comprobar en Grafana.
 - Una creación parcial por fallo HTTP se puede reejecutar; el UID fijo previene duplicados.
@@ -42,3 +42,10 @@ La consulta de replicas utiliza `kube_deployment_spec_replicas` y `kube_deployme
 - Python 3 en el servidor, con acceso local a Grafana, y credenciales AWX del Job 24.
 
 No desplegar un segundo Prometheus ni modificar los playbooks existentes.
+
+## Estado de la integración actual (12/11/2026)
+
+- Job 25 `plan` confirmó 2 pendientes; `apply` creó ambas pausadas. Posteriormente se activaron manualmente y quedaron **Normal**.
+- Se corrigió en Grafana la consulta de CrashLoopBackOff a `max by (namespace, pod, container) (kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}) or vector(0)`. Esta versión del script sincroniza Git con la modificación manual.
+- El Job 24 generó un nuevo respaldo de **7 reglas**.
+- No ejecutar `apply` del Job 25 para intentar reconciliar cambios de existentes: por diseño solo crea y jamás actualiza reglas. Si `plan` señala deriva, inspeccionar manualmente antes de modificar nada.

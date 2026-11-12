@@ -1,0 +1,100 @@
+---
+- name: Validar y crear exclusivamente pausadas las alertas de servicios criticos
+  hosts: grafana-servers
+  gather_facts: false
+  become: true
+
+  vars:
+    var_grafana_critical_mode_effective: "{{ var_grafana_critical_mode | default('plan') }}"
+    var_grafana_critical_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+    var_grafana_critical_tool_path: "{{ var_grafana_install_dir }}/.grafana_critical_alerts_awx.py"
+
+  pre_tasks:
+    - name: Exigir variables sin mostrar secretos
+      ansible.builtin.assert:
+        that:
+          - var_grafana_install_dir is defined
+          - var_grafana_port is defined
+          - var_grafana_admin_user is defined
+          - var_grafana_critical_password | length > 0
+        fail_msg: >-
+          Faltan variables de Grafana o VAR_GRAFANA_ADMIN_PASSWORD.
+          Revisar inventario y credenciales como en el Job 25.
+      no_log: true
+
+    - name: Validar rutas, puerto, modo y confirmacion
+      ansible.builtin.assert:
+        that:
+          - var_grafana_critical_mode_effective in ['plan', 'apply']
+          - var_grafana_install_dir is match('^/[^\n]+$')
+          - var_grafana_install_dir != '/'
+          - "'..' not in var_grafana_install_dir.split('/')"
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - var_grafana_port | int >= 1
+          - var_grafana_port | int <= 65535
+          - var_grafana_critical_mode_effective != 'apply' or (var_grafana_critical_confirm | default('')) == 'CREATE_PAUSED_ONLY'
+          - not ansible_check_mode
+        fail_msg: >-
+          Parametros invalidos. Apply requiere var_grafana_critical_confirm=CREATE_PAUSED_ONLY.
+
+  tasks:
+    - name: Copiar herramienta de alertas criticas (solo en servidor)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/grafana_critical_services_rules.py"
+        dest: "{{ var_grafana_critical_tool_path }}"
+        owner: root
+        group: root
+        mode: '0700'
+      diff: false
+
+    - name: Consultar y, solo si se autoriza, crear reglas pausadas
+      block:
+        - name: Ejecutar verificacion y plan o apply
+          ansible.builtin.command:
+            argv:
+              - python3
+              - "{{ var_grafana_critical_tool_path }}"
+              - --mode
+              - "{{ var_grafana_critical_mode_effective }}"
+              - --port
+              - "{{ var_grafana_port | string }}"
+              - --confirm
+              - "{{ var_grafana_critical_confirm | default('') }}"
+          environment:
+            GRAFANA_ALERTING_USERNAME: "{{ var_grafana_admin_user }}"
+            GRAFANA_ALERTING_PASSWORD: "{{ var_grafana_critical_password }}"
+          register: var_grafana_critical_raw
+          changed_when: >-
+            var_grafana_critical_mode_effective == 'apply' and
+            (var_grafana_critical_raw.stdout | from_json).created_paused | int > 0
+          no_log: true
+          diff: false
+      rescue:
+        - name: Informar fallo seguro sin exponer variables
+          ansible.builtin.fail:
+            msg: >-
+              No se pudo validar el baseline o crear reglas de forma segura.
+              Verificar los jobs up (triage, docker-cadvisor, kube-state-metrics),
+              que las tres consultas devuelvan cero, la regla Host Down de referencia,
+              los permisos y el datasource Prometheus. Ninguna regla existente se actualizo.
+              Si el fallo ocurrio tras iniciar APPLY, revisar la lista de reglas:
+              pueden haberse creado algunas de las nuevas reglas pausadas.
+
+    - name: Parsear resumen protegido
+      ansible.builtin.set_fact:
+        var_grafana_critical_report: "{{ var_grafana_critical_raw.stdout | from_json }}"
+      no_log: true
+      changed_when: false
+
+    - name: Mostrar resultado de servicios criticos
+      ansible.builtin.debug:
+        msg:
+          - "Modo: {{ var_grafana_critical_report.mode }}"
+          - "Datasource Prometheus: {{ var_grafana_critical_report.datasource }}"
+          - "Targets de origen UP: {{ var_grafana_critical_report.sources_up }}/3"
+          - "Incidencias actuales en las 3 expresiones: {{ var_grafana_critical_report.baseline }}"
+          - "Regla de referencia: {{ var_grafana_critical_report.anchor }}"
+          - "Reglas iguales existentes: {{ var_grafana_critical_report.existing }}"
+          - "Reglas pendientes de crear: {{ var_grafana_critical_report.pending }}"
+          - "Reglas nuevas creadas y pausadas: {{ var_grafana_critical_report.created_paused }}"
+          - "Reglas actuales, rutas y contact points: SIN CAMBIOS."

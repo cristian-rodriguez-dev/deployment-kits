@@ -1,0 +1,5 @@
+# Job 26: primeras comprobaciones, sin escrituras en Grafana
+var_grafana_critical_mode: plan
+# Para creacion autorizada, descomentar:
+# var_grafana_critical_mode: apply
+# var_grafana_critical_confirm: CREATE_PAUSED_ONLY

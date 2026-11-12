@@ -31,7 +31,7 @@ RULES = [
     {
         "uid": "awx-k3s-crashloop",
         "title": "K3s - Contenedor en CrashLoopBackOff",
-        "expr": 'max by (namespace, pod, container) (kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"})',
+        "expr": 'max by (namespace, pod, container) (kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}) or vector(0)',
         "duration": "5m",
         "summary": "Contenedor K3s en CrashLoopBackOff durante 5 minutos",
         "description": "Revisar logs del contenedor, eventos del Pod y reinicios.",
