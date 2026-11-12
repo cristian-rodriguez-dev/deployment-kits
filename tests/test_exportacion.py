@@ -48,7 +48,7 @@ class ExportTests(unittest.TestCase):
             with zipfile.ZipFile(output) as z:
                 self.assertEqual(len(z.namelist()), 16)
                 self.assertIsNone(z.testzip())
-            p = subprocess.run([sys.executable, str(VERIFY), str(output)], text=True, capture_output=True)
+            p = subprocess.run([sys.executable, '-X', 'utf8', str(VERIFY), str(output)], text=True, capture_output=True, encoding='utf-8')
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertIn('15 dashboards', p.stdout)
 
@@ -93,7 +93,7 @@ class ExportTests(unittest.TestCase):
                     if name.endswith('/dash00.json'):
                         content = content.replace(b'Dashboard 0', b'Dashboard X')
                     zdest.writestr(name, content)
-            p = subprocess.run([sys.executable, str(VERIFY), str(altered)], text=True, capture_output=True)
+            p = subprocess.run([sys.executable, '-X', 'utf8', str(VERIFY), str(altered)], text=True, capture_output=True, encoding='utf-8')
             self.assertNotEqual(p.returncode, 0)
             self.assertIn('SHA256', p.stderr)
 

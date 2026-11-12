@@ -1,7 +1,7 @@
 ---
 # Ajustes del Job Template 12 - Exportar Dashboards Grafana.
-# Si la auditoría anterior encontró 15 dashboards, conservar 15 como protección.
-var_grafana_export_expected_count: 15
+# Inventario actual validado el 12/11/2026: 16 dashboards V2.
+var_grafana_export_expected_count: 16
 
 # VARIABLES HEREDADAS DE grafana-servers (no duplicar ni modificar las actuales):
 # var_grafana_port: 3000

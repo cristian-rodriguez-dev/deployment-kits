@@ -11,7 +11,7 @@ class ContractTests(unittest.TestCase):
     def test_yaml_parses(self):
         for path in MON.rglob("*.yml"):
             with self.subTest(path=path.name):
-                self.assertIsNotNone(yaml.safe_load(path.read_text(encoding="utf-8")))
+                yaml.safe_load(path.read_text(encoding="utf-8"))
 
     def test_auditor_is_read_only(self):
         data = yaml.safe_load((MON/'playbooks'/'auditar_grafana.yml').read_text())[0]
@@ -33,7 +33,7 @@ class ContractTests(unittest.TestCase):
         self.assertFalse(flags['var_grafana_dashboards_apply'])
         self.assertFalse(flags['var_grafana_dashboards_allow_updates'])
 
-    def test_imported_jsons_are_exactly_seven_v2_with_187_panels(self):
+    def test_imported_jsons_are_exactly_sixteen_v2_with_376_panels(self):
         dashboards=[]
         for p in (MON/'dashboards').glob('*.json'):
             with self.subTest(path=p.name):
@@ -43,8 +43,14 @@ class ContractTests(unittest.TestCase):
                 self.assertEqual(data['metadata']['namespace'],'default')
                 self.assertTrue(data['metadata']['name'])
                 dashboards.append(data)
-        self.assertEqual(len(dashboards),7)
-        self.assertEqual(len(set(x['metadata']['name'] for x in dashboards)),7)
-        self.assertEqual(sum(sum(1 for e in x['spec']['elements'].values() if e.get('kind')=='Panel') for x in dashboards),187)
+        self.assertEqual(len(dashboards),16)
+        self.assertEqual(len(set(x['metadata']['name'] for x in dashboards)),16)
+        self.assertEqual(sum(sum(1 for e in x['spec']['elements'].values() if e.get('kind')=='Panel') for x in dashboards),376)
+        triage = [x for x in dashboards
+                  if x['metadata']['name'] == 'security-triage-observabilidad']
+        self.assertEqual(len(triage), 1)
+        self.assertEqual(triage[0]['spec']['title'], 'Security Triage — Observabilidad del Bot')
+        self.assertEqual(sum(e.get('kind') == 'Panel'
+                             for e in triage[0]['spec']['elements'].values()), 25)
 
 if __name__=='__main__': unittest.main()

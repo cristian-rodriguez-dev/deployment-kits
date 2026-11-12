@@ -59,17 +59,40 @@ Para futuros despliegues manuales del bot y de Prometheus, incluir
 `compose.metrics.yml` junto con los Compose que se empleen normalmente.
 No dejar que otro workflow use solo los Compose base si puede recrear los servicios.
 
-## Grafana
+## Grafana — dashboard como código (16/16 V2)
 
-El JSON importado de Security Triage usa **dashboard clásico** (`uid`,
-`panels`). `monitorizacion/playbooks/configurar_dashboards_grafana.yml`
-requiere recursos **`dashboard.grafana.app/v2`** y, en la versión de este
-repositorio, **bloquea el modo de escritura**. No pegar aquí el JSON clásico
-ni habilitar el flag `apply` sin una migración y revisión independientes.
+La exportación del **12/11/2026** confirmó 16 recursos
+`dashboard.grafana.app/v2`, sin V1 ni clásicos. El dashboard
+**Security Triage — Observabilidad del Bot** se conserva en
+`monitorizacion/dashboards/security-triage-observabilidad.json` con UID de
+Grafana `security-triage-observabilidad`, **25 paneles** y datasource
+`prometheus`. Los 15 dashboards anteriores mantienen sus especificaciones.
 
-Exportar desde Grafana el recurso V2 definitivo con su UID y datasource,
-guardarlo en `monitorizacion/dashboards/`, verificar que coincide con el
-existente y solo después planificar un bloque explícito de aplicación.
+Fuente verificada: ZIP exportado por AWX
+`grafana-dashboards-20261112T104736Z-d7vdtx.zip`;
+SHA256: `2869f92a27f9cc8c294619581207d3c2d997b8bb96c60781300071766c6e1fa3`.
+No versionar el ZIP completo: únicamente el JSON del nuevo dashboard.
+
+Comprobaciones locales desde la raíz de `deployment-kits`:
+
+```powershell
+uv run --python 3.13 --with pytest --with pyyaml --no-project python -X utf8 -m pytest -v tests/test_contract.py tests/test_verificacion.py
+uv run --python 3.13 --no-project python tools/verificar_cobertura_dashboards.py --repo .
+# Con el ZIP original disponible, añadir --export RUTA_AL_ZIP
+```
+
+En AWX utilizar `monitorizacion/playbooks/configurar_dashboards_grafana.yml`
+con `var_grafana_dashboards_apply: false`. Auditar los **16 UIDs** y verificar
+**16/16 SIN CAMBIOS** antes de considerar el bloque incorporado. Este playbook
+**bloquea cualquier escritura** por diseño; agregar el JSON a Git no importa
+ni modifica dashboards en el servidor. No habilitar `apply` ni cambiar la
+protección del playbook para este bloque.
+
+El exportador puede trabajar con `var_grafana_export_expected_count: 16`.
+Los tests que generan snapshots históricos de 15 dashboards siguen siendo
+fixtures de pruebas y no representan el inventario actual. Los ensayos de
+restauración deben usar la cantidad del backup concreto, no asumir que todas
+las copias históricas contienen los 16.
 
 ## Seguridad e idempotencia
 

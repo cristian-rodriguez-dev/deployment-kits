@@ -37,7 +37,7 @@
     - name: Fijar parámetros por defecto modificables desde el inventario AWX
       ansible.builtin.set_fact:
         var_grafana_export_root_effective: "{{ var_grafana_export_root | default(var_grafana_export_default_root) }}"
-        var_grafana_export_count_effective: "{{ var_grafana_export_expected_count | default(15) | int }}"
+        var_grafana_export_count_effective: "{{ var_grafana_export_expected_count | default(16) | int }}"
       changed_when: false
 
     - name: Validar rutas, puerto y cantidad esperada
@@ -169,7 +169,9 @@
         that:
           - var_grafana_export_records | length == var_grafana_export_count_effective | int
           - (var_grafana_export_records | map(attribute='uid') | list | unique | length) == (var_grafana_export_count_effective | int)
-        fail_msg: No se exportaron los 15 dashboards; el ZIP no se creará.
+        fail_msg: >-
+          No se exportaron los {{ var_grafana_export_count_effective }} dashboards
+          esperados; el ZIP no se creará.
 
     - name: Escribir manifiesto privado con la lista de archivos
       ansible.builtin.copy:

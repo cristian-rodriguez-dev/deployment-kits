@@ -12,8 +12,8 @@ spec.loader.exec_module(mod)
 
 class TestVerification(unittest.TestCase):
     def test_identificadores_esperados(self):
-        self.assertEqual(len(mod.EXPECTED_TITLES), 15)
-        self.assertEqual(len(mod.NEW_SHA256), 8)
+        self.assertEqual(len(mod.EXPECTED_TITLES), 16)
+        self.assertEqual(len(mod.NEW_SHA256), 9)
         self.assertTrue(set(mod.NEW_SHA256).issubset(set(mod.EXPECTED_TITLES)))
 
     def test_ruta_vacia_rechazada(self):
@@ -24,7 +24,7 @@ class TestVerification(unittest.TestCase):
     def test_cantidad_incompleta_rechazada(self):
         with tempfile.TemporaryDirectory() as d:
             (Path(d)/'monitorizacion'/'dashboards').mkdir(parents=True)
-            with self.assertRaisesRegex(ValueError,'15 JSON'):
+            with self.assertRaisesRegex(ValueError,'16 JSON'):
                 mod.inspect_repo(Path(d))
 
     def test_zip_incorrecto_rechazado(self):

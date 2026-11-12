@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validación offline de cobertura de los 15 dashboards V2 del laboratorio.
+"""Validación offline de cobertura de los 16 dashboards V2 del laboratorio.
 
 Opcionalmente compara las especificaciones con el ZIP exportado por el Job 12.
 Solo lectura: no conecta a Grafana, no utiliza credenciales y no modifica archivos.
@@ -26,6 +26,7 @@ EXPECTED_TITLES = {
     'wazuh-fim': 'Wazuh — File Integrity (FIM)',
     'wazuh-sca': 'Wazuh — Security Configuration (SCA)',
     'wazuh-security-overview': 'Wazuh — Security Overview',
+    'security-triage-observabilidad': 'Security Triage — Observabilidad del Bot',
 }
 
 NEW_SHA256 = {
@@ -37,6 +38,7 @@ NEW_SHA256 = {
     'wazuh-fim': '7825733717012e2b2a35a4e1e220c419595104e2d9da0b46bd6dce3490dfc454',
     'wazuh-sca': 'af87edff839d23e6bb97f373180ebcae28576aab465d43c1baca4ab97e06662e',
     'wazuh-security-overview': '9dafc032f6a4db46f7ef8c89deaf456811be60b4cecd90b904f0b53ac616ea24',
+    'security-triage-observabilidad': '8b19249694fb30d97c992aaa4c9e5d7c0ce82fe9ee222fafc9bd05a4663e7936',
 }
 
 
@@ -45,8 +47,8 @@ def inspect_repo(repo: Path) -> tuple[dict, int]:
     if not folder.is_dir():
         raise ValueError(f'No existe directorio de dashboards: {folder}')
     files = sorted(folder.glob('*.json'))
-    if len(files) != 15:
-        raise ValueError(f'Se esperaban 15 JSON; encontrados {len(files)}')
+    if len(files) != 16:
+        raise ValueError(f'Se esperaban 16 JSON; encontrados {len(files)}')
     found = {}
     panels = 0
     for path in files:
@@ -75,13 +77,13 @@ def inspect_repo(repo: Path) -> tuple[dict, int]:
 
 
 def verify_against_export(found: dict, zip_path: Path) -> None:
-    expected_hash = 'fc2791cdb2f67e7d1208954129e3d5a54aeabae6633091ca56423be7f07e9e7f'
+    expected_hash = '2869f92a27f9cc8c294619581207d3c2d997b8bb96c60781300071766c6e1fa3'
     if hashlib.sha256(zip_path.read_bytes()).hexdigest() != expected_hash:
         raise ValueError('SHA256 del ZIP exportado diferente del registrado en AWX')
     with ZipFile(zip_path) as bundle:
         manifest = json.loads(bundle.read('manifest.json'))
         records = manifest['dashboards']
-        if len(records) != 15 or manifest.get('expected_count') != 15:
+        if len(records) != 16 or manifest.get('expected_count') != 16:
             raise ValueError('Manifiesto de exportación incompleto')
         for row in records:
             uid = row['uid']
@@ -104,10 +106,10 @@ def main() -> int:
     args = ap.parse_args()
     try:
         found, panels = inspect_repo(args.repo)
-        print(f'OK: {len(found)} dashboards V2 únicos; {panels} paneles; 8 nuevos con SHA256 verificado.')
+        print(f'OK: {len(found)} dashboards V2 únicos; {panels} paneles; 9 con SHA256 verificado.')
         if args.export:
             verify_against_export(found, args.export)
-            print('OK: 15/15 definiciones coinciden con la exportación íntegra del Job 12.')
+            print('OK: 16/16 definiciones coinciden con la exportación íntegra del Job 12.')
         return 0
     except (ValueError, KeyError, OSError, json.JSONDecodeError, RuntimeError) as exc:
         print(f'ERROR: {exc}')
