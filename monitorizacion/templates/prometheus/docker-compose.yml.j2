@@ -29,6 +29,9 @@ services:
       red_monitorizacion:
         aliases:
           - prometheus
+{% if var_prometheus_triage_enabled | default(false) | bool %}
+      triage_metrics: {}
+{% endif %}
 
     depends_on:
       - node-exporter
@@ -70,3 +73,8 @@ networks:
   red_monitorizacion:
     name: {{ var_monitorizacion_network | to_json }}
     external: true
+{% if var_prometheus_triage_enabled | default(false) | bool %}
+  triage_metrics:
+    name: {{ var_triage_metrics_network | default('triage-metrics-private') | to_json }}
+    external: true
+{% endif %}

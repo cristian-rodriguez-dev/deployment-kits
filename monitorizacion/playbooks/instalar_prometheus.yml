@@ -24,6 +24,38 @@
           Faltan variables de Prometheus.
           Configúralas en el grupo prometheus-servers de AWX.
 
+    - name: Validar el flag opcional de integración con Security Triage
+      ansible.builtin.assert:
+        that:
+          - (var_prometheus_triage_enabled | default(false)) is boolean
+        fail_msg: var_prometheus_triage_enabled debe ser booleano (true/false).
+
+    - name: Detectar una integración Security Triage ya configurada
+      ansible.builtin.stat:
+        path: "{{ var_prometheus_install_dir }}/prometheus/prometheus.yml"
+      register: var_prometheus_existing_config_stat
+      changed_when: false
+
+    - name: Leer la configuración existente para proteger el job adoptado
+      ansible.builtin.slurp:
+        src: "{{ var_prometheus_install_dir }}/prometheus/prometheus.yml"
+      register: var_prometheus_existing_config
+      no_log: true
+      when: var_prometheus_existing_config_stat.stat.isreg | default(false)
+
+    - name: Impedir borrar accidentalmente el job Security Triage existente
+      ansible.builtin.assert:
+        that:
+          - >-
+            (var_prometheus_triage_enabled | default(false) | bool)
+            or
+            ('security-triage-bot' not in (var_prometheus_existing_config.content | b64decode))
+        fail_msg: >-
+          El Prometheus existente contiene security-triage-bot, pero el flag
+          var_prometheus_triage_enabled está desactivado. Revisa el inventario AWX
+          antes de regenerar la configuración; no se ha modificado Prometheus.
+      when: var_prometheus_existing_config_stat.stat.isreg | default(false)
+
     - name: Comprobar sistema operativo
       ansible.builtin.assert:
         that:
@@ -60,6 +92,33 @@
           - docker
           - info
       changed_when: false
+
+    - name: Comprobar que la red privada de Security Triage ya existe
+      ansible.builtin.command:
+        argv:
+          - docker
+          - network
+          - inspect
+          - "{{ var_triage_metrics_network | default('triage-metrics-private') }}"
+      changed_when: false
+      no_log: true
+      when: var_prometheus_triage_enabled | default(false) | bool
+
+    - name: Comprobar que existe el token privado de métricas
+      ansible.builtin.stat:
+        path: "{{ var_prometheus_install_dir }}/prometheus/triage_metrics_token"
+      register: var_triage_metrics_token_stat
+      no_log: true
+      when: var_prometheus_triage_enabled | default(false) | bool
+
+    - name: Rechazar integración sin token preexistente
+      ansible.builtin.assert:
+        that:
+          - var_triage_metrics_token_stat.stat.isreg | default(false)
+        fail_msg: >-
+          Falta prometheus/triage_metrics_token. Provisiona la credencial fuera de Git
+          antes de activar Security Triage en la plantilla de Prometheus.
+      when: var_prometheus_triage_enabled | default(false) | bool
 
     - name: Comprobar Docker Compose
       ansible.builtin.command:
@@ -142,6 +201,7 @@
           --user 0:0
           --entrypoint /bin/promtool
           --volume %s:/tmp/prometheus.yml:ro
+          --volume {{ var_prometheus_install_dir }}/prometheus:/etc/prometheus:ro
           --volume {{ var_prometheus_kubernetes_credentials_dir }}:/etc/prometheus-kubernetes:ro
           {{ var_prometheus_image }}
           check config /tmp/prometheus.yml

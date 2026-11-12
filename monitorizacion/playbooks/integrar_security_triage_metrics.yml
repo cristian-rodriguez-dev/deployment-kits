@@ -1,0 +1,284 @@
+---
+- name: Auditar o adoptar la integración existente Security Triage y Prometheus
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+
+  vars:
+    var_triage_integration_mode: audit
+    var_triage_metrics_network: triage-metrics-private
+    var_triage_metrics_job: security-triage-bot
+    var_triage_metrics_alias: triage-metrics
+    var_triage_bot_container: security-triage-bot
+    var_triage_prometheus_container: prometheus-prometheus-1
+    var_triage_metrics_token_path: "{{ var_prometheus_install_dir }}/prometheus/triage_metrics_token"
+
+  pre_tasks:
+    - name: Validar modo y directorios declarados en AWX
+      ansible.builtin.assert:
+        that:
+          - var_triage_integration_mode in ['audit', 'apply']
+          - var_prometheus_install_dir is defined
+          - var_triage_bot_install_dir is defined
+          - var_prometheus_install_dir is match('^/[^\n]+$')
+          - var_triage_bot_install_dir is match('^/[^\n]+$')
+          - var_prometheus_install_dir != '/'
+          - var_triage_bot_install_dir != '/'
+          - var_triage_bot_install_dir != var_prometheus_install_dir
+          - var_triage_metrics_network == 'triage-metrics-private'
+        fail_msg: >-
+          Modo audit/apply y rutas absolutas de ambos servicios requeridos.
+          La red debe ser la ya validada, triage-metrics-private.
+
+    - name: Verificar que Docker está operativo
+      ansible.builtin.command:
+        argv: [docker, info]
+      changed_when: false
+
+    - name: Comprobar el archivo de configuración actual de Prometheus
+      ansible.builtin.stat:
+        path: "{{ var_prometheus_install_dir }}/prometheus/prometheus.yml"
+      register: var_triage_prom_config_stat
+      changed_when: false
+
+    - name: Comprobar el token existente sin mostrarlo
+      ansible.builtin.stat:
+        path: "{{ var_triage_metrics_token_path }}"
+      register: var_triage_token_stat
+      no_log: true
+      changed_when: false
+
+    - name: Rechazar rutas incompletas sin alterar servicios
+      ansible.builtin.assert:
+        that:
+          - var_triage_prom_config_stat.stat.isreg | default(false)
+          - var_triage_token_stat.stat.isreg | default(false)
+        fail_msg: Faltan prometheus.yml o el token de métricas. No se ha modificado nada.
+
+    - name: Leer la configuración actual sin mostrar su contenido
+      ansible.builtin.slurp:
+        src: "{{ var_prometheus_install_dir }}/prometheus/prometheus.yml"
+      register: var_triage_prom_config_raw
+      no_log: true
+
+    - name: Extraer únicamente el job de Security Triage
+      ansible.builtin.set_fact:
+        var_triage_jobs: >-
+          {{ ((var_triage_prom_config_raw.content | b64decode | from_yaml).scrape_configs | default([]))
+             | selectattr('job_name', 'equalto', var_triage_metrics_job) | list }}
+      no_log: true
+      changed_when: false
+
+    - name: Comprobar que el job actual es compatible y no está duplicado
+      ansible.builtin.assert:
+        that:
+          - var_triage_jobs | length == 1
+          - var_triage_jobs[0].metrics_path == '/internal/metrics'
+          - var_triage_jobs[0].authorization.type == 'Bearer'
+          - var_triage_jobs[0].authorization.credentials_file == '/etc/prometheus/triage_metrics_token'
+          - var_triage_jobs[0].static_configs[0].targets == ['triage-metrics:8080']
+        fail_msg: >-
+          Job ausente, duplicado o diferente. No se sobrescribe prometheus.yml;
+          revisa el contrato y la plantilla de Prometheus antes de aplicar.
+
+    - name: Inspeccionar red privada de Docker
+      ansible.builtin.command:
+        argv: [docker, network, inspect, "{{ var_triage_metrics_network }}"]
+      register: var_triage_network_inspect
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Comprobar contenedores existentes sin alterarlos
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - "{{ var_triage_bot_container }}"
+          - "{{ var_triage_prometheus_container }}"
+      register: var_triage_container_inspect
+      changed_when: false
+      no_log: true
+
+    - name: Guardar estado de conexiones sin exponer los JSON de Docker
+      ansible.builtin.set_fact:
+        var_triage_bot_attached: >-
+          {{ var_triage_metrics_network in
+             (var_triage_container_inspect.stdout | from_json)[0].NetworkSettings.Networks }}
+        var_triage_prom_attached: >-
+          {{ var_triage_metrics_network in
+             (var_triage_container_inspect.stdout | from_json)[1].NetworkSettings.Networks }}
+      changed_when: false
+
+    - name: Validar red existente, si está creada
+      ansible.builtin.assert:
+        that:
+          - (var_triage_network_inspect.stdout | from_json)[0].Driver == 'bridge'
+          - (var_triage_network_inspect.stdout | from_json)[0].Internal | bool
+        fail_msg: La red existe pero no es bridge interna; se bloquea la adopción.
+      when: var_triage_network_inspect.rc == 0
+
+    - name: Consultar overlays persistentes sin modificar su contenido
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ var_triage_bot_install_dir }}/compose.metrics.yml"
+        - "{{ var_prometheus_install_dir }}/compose.metrics.yml"
+      register: var_triage_overlay_stats
+      changed_when: false
+
+  tasks:
+    - name: Mostrar plan de auditoría sin datos sensibles
+      ansible.builtin.debug:
+        msg:
+          - "Modo: {{ var_triage_integration_mode }}"
+          - "Red existente: {{ var_triage_network_inspect.rc == 0 }}"
+          - "Bot conectado: {{ var_triage_bot_attached }}"
+          - "Prometheus conectado: {{ var_triage_prom_attached }}"
+          - "Overlays existentes: {{ var_triage_overlay_stats.results | map(attribute='stat.exists') | list }}"
+          - 'Job de scrape: único y compatible; token: presente'
+
+    - name: Aplicar exclusivamente la adopción de red y overlays
+      when: var_triage_integration_mode == 'apply'
+      block:
+        - name: Crear la red privada únicamente si no existe
+          ansible.builtin.command:
+            argv:
+              - docker
+              - network
+              - create
+              - --driver
+              - bridge
+              - --internal
+              - "{{ var_triage_metrics_network }}"
+          when: var_triage_network_inspect.rc != 0
+          changed_when: true
+
+        - name: Crear overlay del bot solo si no existe
+          ansible.builtin.copy:
+            dest: "{{ var_triage_bot_install_dir }}/compose.metrics.yml"
+            force: false
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              services:
+                triage-bot:
+                  networks:
+                    triage_metrics:
+                      aliases:
+                        - triage-metrics
+
+              networks:
+                triage_metrics:
+                  external: true
+                  name: triage-metrics-private
+
+        - name: Crear overlay de Prometheus solo si no existe
+          ansible.builtin.copy:
+            dest: "{{ var_prometheus_install_dir }}/compose.metrics.yml"
+            force: false
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              services:
+                prometheus:
+                  networks:
+                    triage_metrics: {}
+
+              networks:
+                triage_metrics:
+                  external: true
+                  name: triage-metrics-private
+
+        - name: Leer ambos overlays finales para comprobar su contrato
+          ansible.builtin.slurp:
+            src: "{{ item }}"
+          loop:
+            - "{{ var_triage_bot_install_dir }}/compose.metrics.yml"
+            - "{{ var_prometheus_install_dir }}/compose.metrics.yml"
+          register: var_triage_overlays_read
+          no_log: true
+
+        - name: Validar el overlay final del bot
+          ansible.builtin.assert:
+            that:
+              - "'triage-metrics' in var_triage_bot_overlay.services['triage-bot'].networks.triage_metrics.aliases"
+              - var_triage_bot_overlay.networks.triage_metrics.external | bool
+              - var_triage_bot_overlay.networks.triage_metrics.name == var_triage_metrics_network
+          vars:
+            var_triage_bot_overlay: "{{ var_triage_overlays_read.results[0].content | b64decode | from_yaml }}"
+          fail_msg: El overlay existente del bot difiere. No se sobrescribe.
+
+        - name: Validar el overlay final de Prometheus
+          ansible.builtin.assert:
+            that:
+              - var_triage_prom_overlay.services.prometheus.networks.triage_metrics is defined
+              - var_triage_prom_overlay.networks.triage_metrics.external | bool
+              - var_triage_prom_overlay.networks.triage_metrics.name == var_triage_metrics_network
+          vars:
+            var_triage_prom_overlay: "{{ var_triage_overlays_read.results[1].content | b64decode | from_yaml }}"
+          fail_msg: El overlay existente de Prometheus difiere. No se sobrescribe.
+
+        - name: Conectar bot a la red si falta (sin recreación)
+          ansible.builtin.command:
+            argv:
+              - docker
+              - network
+              - connect
+              - --alias
+              - "{{ var_triage_metrics_alias }}"
+              - "{{ var_triage_metrics_network }}"
+              - "{{ var_triage_bot_container }}"
+          when: not (var_triage_bot_attached | bool)
+          changed_when: true
+
+        - name: Conectar Prometheus a la red si falta (sin recreación)
+          ansible.builtin.command:
+            argv:
+              - docker
+              - network
+              - connect
+              - "{{ var_triage_metrics_network }}"
+              - "{{ var_triage_prometheus_container }}"
+          when: not (var_triage_prom_attached | bool)
+          changed_when: true
+
+    - name: Comprobar que Prometheus puede leer el token montado
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - --user
+          - '65534:65534'
+          - "{{ var_triage_prometheus_container }}"
+          - sh
+          - -c
+          - 'test -r /etc/prometheus/triage_metrics_token'
+      changed_when: false
+      no_log: true
+
+    - name: Consultar el target existente de Prometheus sin exponer credenciales
+      ansible.builtin.uri:
+        url: >-
+          http://127.0.0.1:{{ var_prometheus_port | default(9090) }}/api/v1/query?query=up%7Bjob%3D%22security-triage-bot%22%7D
+        method: GET
+        status_code: 200
+        return_content: true
+      register: var_triage_target_query
+      changed_when: false
+
+    - name: Confirmar respuesta de Prometheus y target UP
+      ansible.builtin.assert:
+        that:
+          - var_triage_target_query.json.status == 'success'
+          - var_triage_target_query.json.data.result | length == 1
+          - var_triage_target_query.json.data.result[0].value[1] == '1'
+        fail_msg: Target ausente o DOWN. Revisar antes de dar la integración por estable.
+
+    - name: Mostrar resultado final
+      ansible.builtin.debug:
+        msg: >-
+          Integración Security Triage: target UP, job único, secretos no exportados.
+          No se ha reiniciado ni actualizado ningún contenedor.
