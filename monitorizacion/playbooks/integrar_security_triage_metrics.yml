@@ -207,9 +207,9 @@
               - "'triage-metrics' in var_triage_bot_overlay.services['triage-bot'].networks.triage_metrics.aliases"
               - var_triage_bot_overlay.networks.triage_metrics.external | bool
               - var_triage_bot_overlay.networks.triage_metrics.name == var_triage_metrics_network
+            fail_msg: El overlay existente del bot difiere. No se sobrescribe.
           vars:
             var_triage_bot_overlay: "{{ var_triage_overlays_read.results[0].content | b64decode | from_yaml }}"
-          fail_msg: El overlay existente del bot difiere. No se sobrescribe.
 
         - name: Validar el overlay final de Prometheus
           ansible.builtin.assert:
@@ -217,9 +217,9 @@
               - var_triage_prom_overlay.services.prometheus.networks.triage_metrics is defined
               - var_triage_prom_overlay.networks.triage_metrics.external | bool
               - var_triage_prom_overlay.networks.triage_metrics.name == var_triage_metrics_network
+            fail_msg: El overlay existente de Prometheus difiere. No se sobrescribe.
           vars:
             var_triage_prom_overlay: "{{ var_triage_overlays_read.results[1].content | b64decode | from_yaml }}"
-          fail_msg: El overlay existente de Prometheus difiere. No se sobrescribe.
 
         - name: Conectar bot a la red si falta (sin recreación)
           ansible.builtin.command:
