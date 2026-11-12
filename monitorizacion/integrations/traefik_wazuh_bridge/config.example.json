@@ -1,0 +1,14 @@
+{
+  "loki_url": "http://127.0.0.1:13100",
+  "query": "{app=\"traefik\",namespace=\"kube-system\"} | json",
+  "output_path": "/srv/traefik-wazuh-bridge/events/traefik-access.jsonl",
+  "state_path": "/var/lib/traefik-wazuh-bridge/state.sqlite",
+  "poll_seconds": 15,
+  "lag_seconds": 10,
+  "overlap_seconds": 20,
+  "initial_lookback_seconds": 120,
+  "window_seconds": 30,
+  "max_windows_per_poll": 12,
+  "limit": 1000,
+  "max_output_bytes": 52428800
+}

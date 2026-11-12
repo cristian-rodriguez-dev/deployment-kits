@@ -1,0 +1,23 @@
+[Unit]
+Description=Traefik Loki to Wazuh JSONL bridge (detections only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=traefik-wazuh
+Group=traefik-wazuh
+UMask=0027
+ExecStart=/usr/bin/python3 /opt/traefik-wazuh-bridge/bridge.py --config /etc/traefik-wazuh-bridge/config.json
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/traefik-wazuh-bridge /srv/traefik-wazuh-bridge/events
+
+[Install]
+WantedBy=multi-user.target

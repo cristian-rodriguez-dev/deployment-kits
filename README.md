@@ -1,28 +1,25 @@
-# Bloque 05 — Grafana Alerting AWX v2
+# Bloque 07 — Consolidación Grafana Alerting AWX (laboratorio antiguo)
 
-**Objeto:** el Job 24 que guarda la configuración de alerting existente en un snapshot protegido, y puede compararla con el estado posterior, sin modificar Grafana.
+**Alcance:** verificación segura en AWX de las 10 alertas y canales de emergencia ya configurados. No se necesita volver a crear reglas, detener contenedores ni reinstalar Grafana.
 
-**Corrección v2:** `diff: false` es una palabra clave de tarea de Ansible, no un parámetro de `ansible.builtin.copy`. Se ha movido fuera del módulo. No se modifica el exportador ni el comportamiento del respaldo.
+## Contenido
 
-## Instalación
+- `monitorizacion/playbooks/auditar_alerting_operativo_grafana.yml` — nuevo Job 27, verifica mediante API GET.
+- `monitorizacion/files/grafana_alerting_operational_audit.py` — auditor de deriva, sin datos sensibles en stdout.
+- `monitorizacion/files/grafana_k3s_rules.py` y `grafana_critical_services_rules.py` — referencias **idénticas al Bloque 06** para comparar lo declarado. Revisar `git diff` antes de sustituir archivos que hayan cambiado localmente.
+- `monitorizacion/examples/variables_auditoria_alerting_operativo.yml` — parámetros iniciales, sin secretos.
+- `monitorizacion/ALERTING_OPERATIVO_GRAFANA_AWX.md` — arquitectura, riesgo de sobrescribir SMTP con Job 05, límites y pasos.
+- `tests/test_alerting_operational_audit.py` — pruebas locales.
 
-1. Incorporar las carpetas `monitorizacion/` y `tests/` de este ZIP a la **raíz** de `deployment-kits`.
-2. Revisar Git (`git status --short`, `git diff`); comprobar que no se han incluido backups, secretos ni `.env`.
-3. Ejecutar los tests (`uv run --python 3.15 --no-project -m unittest discover -s tests -p test_grafana_alerting.py -v`).
-4. Hacer commit, push y sincronizar el proyecto en AWX.
-5. Actualizar el Job `24 - Respaldar y comparar alerting Grafana` con `monitorizacion/playbooks/gestionar_alerting_grafana.yml`.
-6. Reutilizar las credenciales e inventario del Job 10. Extra Vars:
+## Inicio rápido
 
-```yaml
-var_grafana_alerting_mode: capture
-```
+1. Descomprimir en `C:\deployment-kits` conservando la jerarquía.
+2. Ejecutar `python -m unittest discover -s tests -p test_alerting_operational_audit.py -v` (o `uv run --python 3.15 --no-project -m unittest ...`).
+3. `git diff --check; git status --short`; revisar que nada sensible vaya al commit.
+4. Commit, push y sincronizar el proyecto AWX.
+5. Crear Job 27 con `monitorizacion/playbooks/auditar_alerting_operativo_grafana.yml`, copiando el inventario y credenciales del Job 24.
+6. Ejecutar con variables de `monitorizacion/examples/variables_auditoria_alerting_operativo.yml`; enviar solo el resumen seguro y `PLAY RECAP`.
 
-7. Ejecutar una vez. Copiar solamente la tarea **Mostrar inventario sin contenidos ni credenciales** y el `PLAY RECAP`.
+**NO ejecutar el Job 05 instalador** para aplicar este bloque: su template antiguo no contiene el SMTP recién configurado. **NO** versionar `.env`, `.env.mail`, `secrets/`, respaldos de Grafana ni el JSON privado del Job 24.
 
-La ejecución generará una captura sensible con permisos privados en el servidor. **No enviar aquí ese archivo y no subirlo a Git**.
-
-## Qué NO hace
-
-Este Job **no** aprovisiona reglas ni contact points ni cambia notificaciones, y tampoco habilita modo de escritura. No reemplaza el Job 13 de backup integral, ni comprueba que un correo o mensaje Telegram sea entregado. El despliegue declarativo será la siguiente fase, una vez comprobado el inventario real.
-
-Más detalles: `monitorizacion/ALERTING_GRAFANA_AWX.md`.
+No se ha realizado ninguna ejecución contra el servidor real; solo pruebas locales con datos simulados.

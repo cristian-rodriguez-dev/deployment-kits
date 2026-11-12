@@ -1,0 +1,5 @@
+# Nuevo Job de verificacion operativa de Grafana - SOLO GET
+var_grafana_expected_rules: 10
+# El API legacy enumera integraciones; la UI puede agruparlas por nombre.
+var_grafana_expected_integrations: 3
+var_grafana_emergency_contact_name: "Infraestructura - Emergencias"

@@ -1,0 +1,45 @@
+<!-- Copy into a uniquely named file under /var/ossec/etc/rules/.
+     Check rule ID availability first. Does NOT enable Active Response. -->
+<group name="traefik_web,custom_detection,">
+  <rule id="100600" level="1">
+    <decoded_as>json</decoded_as>
+    <field name="integration">^traefik_loki$</field>
+    <description>Traefik web access event from trusted Loki bridge</description>
+    <options>no_log</options>
+  </rule>
+
+  <rule id="100601" level="7">
+    <if_sid>100600</if_sid>
+    <field name="RequestPath" type="pcre2">(?i)(/\.env(?:/|$)|/\.git(?:/|$)|/wp-admin(?:/|$)|/actuator(?:/|$)|/cgi-bin(?:/|$)|/vendor/phpunit(?:/|$))</field>
+    <description>Traefik: request for a sensitive or commonly scanned path</description>
+    <group>web_scan,</group>
+  </rule>
+
+  <rule id="100602" level="1">
+    <if_sid>100600</if_sid>
+    <field name="DownstreamStatus" type="pcre2">^(401|403|429)$</field>
+    <description>Traefik: authentication or throttling response (correlation base)</description>
+    <options>no_log</options>
+  </rule>
+
+  <rule id="100603" level="8" frequency="8" timeframe="120">
+    <if_matched_sid>100602</if_matched_sid>
+    <same_field>ClientHost</same_field>
+    <description>Traefik: repeated 401/403/429 from the same client in 120 seconds</description>
+    <group>web_auth_abuse,</group>
+  </rule>
+
+  <rule id="100604" level="1">
+    <if_sid>100600</if_sid>
+    <field name="DownstreamStatus">^404$</field>
+    <description>Traefik: path not found (correlation base)</description>
+    <options>no_log</options>
+  </rule>
+
+  <rule id="100605" level="7" frequency="15" timeframe="120">
+    <if_matched_sid>100604</if_matched_sid>
+    <same_field>ClientHost</same_field>
+    <description>Traefik: many missing paths from the same client in 120 seconds</description>
+    <group>web_scan,</group>
+  </rule>
+</group>

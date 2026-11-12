@@ -1,0 +1,120 @@
+---
+- name: Verificar configuracion operativa de Grafana Alerting sin escrituras
+  hosts: grafana-servers
+  gather_facts: false
+  become: true
+
+  vars:
+    var_grafana_audit_tool_dir: "{{ var_grafana_install_dir }}/.alerting_operational_audit"
+    var_grafana_audit_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+
+  pre_tasks:
+    - name: Exigir variables y credenciales sin exponer valores
+      ansible.builtin.assert:
+        that:
+          - var_grafana_install_dir is defined
+          - var_grafana_port is defined
+          - var_grafana_admin_user is defined
+          - var_grafana_audit_password | length > 0
+          - not ansible_check_mode
+        fail_msg: Revisar inventario, credencial Grafana del Job 24 y modo normal del Job.
+      no_log: true
+
+    - name: Comprobar rutas y parametros de solo lectura
+      ansible.builtin.assert:
+        that:
+          - var_grafana_install_dir is match('^/[^\n]+$')
+          - var_grafana_install_dir != '/'
+          - "'..' not in var_grafana_install_dir.split('/')"
+          - (var_grafana_port | string) is match('^[0-9]+$')
+          - var_grafana_port | int >= 1
+          - var_grafana_port | int <= 65535
+          - var_grafana_expected_rules | default(10) | int >= 5
+          - var_grafana_expected_integrations | default(3) | int >= 2
+        fail_msg: Parametros de auditoria invalidos; no se ha consultado Grafana.
+
+  tasks:
+    - name: Preparar directorio protegido para verificador sin secretos
+      ansible.builtin.file:
+        path: "{{ var_grafana_audit_tool_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Copiar definiciones K3s y servicios criticos desde Git
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/{{ item }}"
+        dest: "{{ var_grafana_audit_tool_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: '0600'
+      loop:
+        - grafana_k3s_rules.py
+        - grafana_critical_services_rules.py
+      diff: false
+
+    - name: Copiar auditor operacional protegido
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/grafana_alerting_operational_audit.py"
+        dest: "{{ var_grafana_audit_tool_dir }}/grafana_alerting_operational_audit.py"
+        owner: root
+        group: root
+        mode: '0700'
+      diff: false
+
+    - name: Consultar API Grafana por GET sin publicar secretos
+      block:
+        - name: Auditar cinco reglas nuevas y canales de emergencia
+          ansible.builtin.command:
+            argv:
+              - python3
+              - "{{ var_grafana_audit_tool_dir }}/grafana_alerting_operational_audit.py"
+              - --port
+              - "{{ var_grafana_port | string }}"
+              - --expected-rules
+              - "{{ var_grafana_expected_rules | default(10) | string }}"
+              - --expected-integrations
+              - "{{ var_grafana_expected_integrations | default(3) | string }}"
+              - --emergency-contact
+              - "{{ var_grafana_emergency_contact_name | default('Infraestructura - Emergencias') }}"
+          environment:
+            GRAFANA_ALERTING_USERNAME: "{{ var_grafana_admin_user }}"
+            GRAFANA_ALERTING_PASSWORD: "{{ var_grafana_audit_password }}"
+            PYTHONDONTWRITEBYTECODE: '1'
+          register: var_grafana_operational_audit_raw
+          changed_when: false
+          no_log: true
+          diff: false
+      rescue:
+        - name: Detener auditoria si la API no responde
+          ansible.builtin.fail:
+            msg: >-
+              La lectura de Grafana ha fallado. Revisar API, variables,
+              credenciales y version. No se han modificado reglas ni canales.
+
+    - name: Parsear solo informe no sensible
+      ansible.builtin.set_fact:
+        var_grafana_operational_audit: "{{ var_grafana_operational_audit_raw.stdout | from_json }}"
+      no_log: true
+      changed_when: false
+
+    - name: Mostrar resumen seguro del estado declarado
+      ansible.builtin.debug:
+        msg:
+          - "Resultado: {{ var_grafana_operational_audit.state }}"
+          - "Reglas: {{ var_grafana_operational_audit.rules_total }}"
+          - "Integraciones contact points: {{ var_grafana_operational_audit.contact_integrations_total }}"
+          - "Reglas nuevas verificadas: {{ var_grafana_operational_audit.known_rules_checked }}"
+          - "Reglas originales preservadas, no gestionadas: {{ var_grafana_operational_audit.original_rules_unmanaged }}"
+          - "Emergencias por: {{ var_grafana_operational_audit.emergency_types | join(', ') }}"
+          - "Ruta directa del bot: {{ var_grafana_operational_audit.bot_route }}"
+          - "Detalle (UID/estado/campos): {{ var_grafana_operational_audit.details }}"
+          - "Incidencias: {{ var_grafana_operational_audit.issues | join(', ') | default('ninguna', true) }}"
+          - "Consultas solo GET: {{ var_grafana_operational_audit.read_only }}"
+
+    - name: Rechazar deriva sin modificar recursos
+      ansible.builtin.assert:
+        that:
+          - var_grafana_operational_audit.state == 'OK'
+        fail_msg: Deriva detectada. Revisar resumen seguro anterior; no aplicar recreaciones automáticas.

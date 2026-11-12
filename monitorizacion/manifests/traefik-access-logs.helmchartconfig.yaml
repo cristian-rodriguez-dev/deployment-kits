@@ -1,0 +1,20 @@
+# Declarative equivalent of the HelmChartConfig verified on K3s (Traefik 3.7.13, chart 40.1.5+up40.1.0).
+# CAUTION: K3s manages/reconciles this resource, may roll the Traefik pod.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    logs:
+      access:
+        enabled: true
+        format: json
+        fields:
+          general:
+            defaultmode: keep
+          headers:
+            defaultmode: drop
+    additionalArguments:
+      - "--accesslog.fields.queryparameters.defaultmode=drop"

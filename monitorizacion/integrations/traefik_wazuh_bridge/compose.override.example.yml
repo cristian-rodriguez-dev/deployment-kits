@@ -1,0 +1,6 @@
+# Merge with existing Wazuh Docker Compose deployment, never use standalone.
+# Requires TRAEFIK_WAZUH_EVENTS_DIR on host, e.g. /srv/traefik-wazuh-bridge/events.
+services:
+  wazuh.manager:
+    volumes:
+      - ${TRAEFIK_WAZUH_EVENTS_DIR:?set_host_events_dir}:/var/ossec/logs/traefik-bridge:ro
