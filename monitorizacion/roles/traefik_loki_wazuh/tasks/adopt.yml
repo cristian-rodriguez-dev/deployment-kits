@@ -1,0 +1,212 @@
+---
+- name: Exigir autorización expresa para adoptar
+  ansible.builtin.assert:
+    that:
+      - var_tlw_mode == 'adopt'
+      - var_tlw_apply | bool
+      - _tlw_compose_project_ok | bool
+      - _tlw_config_paths_ok | bool
+      - _tlw_manager_read_ok | bool
+      - _tlw_manager_running_ok | bool
+      - _tlw_manager_localfile_ok | bool
+      - _tlw_rules_match | bool
+      - _tlw_service_active.stdout == 'active'
+      - _tlw_service_enabled.stdout == 'enabled'
+    fail_msg: 'Falta autorización o existe deriva del Manager/puente; NO se modifica nada.'
+
+- name: Validar aprobación específica para diferencias de archivos del puente
+  ansible.builtin.assert:
+    that:
+      - (_tlw_script_matches | bool) or (var_tlw_allow_bridge_file_update | bool)
+      - (_tlw_unit_matches | bool) or (var_tlw_allow_bridge_file_update | bool)
+      - ((_tlw_script_matches | bool) and (_tlw_unit_matches | bool)) or (var_tlw_allow_service_restart | bool)
+    fail_msg: 'Los archivos actuales difieren de Git: primero revisar diff y aprobar actualización más reinicio.'
+
+- name: Validar aprobación específica para cambio de URL Loki
+  ansible.builtin.assert:
+    that:
+      - (_tlw_loki_url_matches | bool) or (var_tlw_allow_loki_url_update | bool)
+      - (_tlw_loki_url_matches | bool) or (var_tlw_allow_service_restart | bool)
+    fail_msg: 'La URL interna Loki cambió. No se modifica sin aprobación explícita.'
+
+- name: Validar aprobación específica para cambios en Traefik
+  ansible.builtin.assert:
+    that:
+      - (_tlw_helm_matches | bool) or (var_tlw_allow_traefik_update | bool)
+      - (_tlw_helm_matches | bool) or (var_tlw_ack_traefik_rollout | bool)
+    fail_msg: 'HelmChartConfig difiere: no aplicar sin aprobación y aceptación de posible rolling restart.'
+
+- name: Verificar directorios antes de modificar metadatos
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+  loop:
+    - /opt/traefik-wazuh-bridge
+    - /etc/traefik-wazuh-bridge
+    - /var/lib/traefik-wazuh-bridge
+    - /srv/traefik-wazuh-bridge/events
+  register: _tlw_directory_stats
+
+- name: Rechazar directorios ausentes o simbólicos en adopción
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir | default(false)
+      - not (item.stat.islnk | default(false))
+    fail_msg: 'No se adopta una ruta que no sea un directorio real.'
+  loop: '{{ _tlw_directory_stats.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+
+- name: Mantener permisos del directorio de aplicación
+  ansible.builtin.file:
+    path: /opt/traefik-wazuh-bridge
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Mantener permisos del directorio de configuración
+  ansible.builtin.file:
+    path: /etc/traefik-wazuh-bridge
+    state: directory
+    owner: root
+    group: '{{ var_tlw_service_group }}'
+    mode: '0750'
+
+- name: Mantener permisos de SQLite sin tocar su contenido
+  ansible.builtin.file:
+    path: /var/lib/traefik-wazuh-bridge
+    state: directory
+    owner: '{{ var_tlw_service_user }}'
+    group: '{{ var_tlw_service_group }}'
+    mode: '0700'
+
+- name: Mantener permisos del directorio JSONL sin truncar
+  ansible.builtin.file:
+    path: /srv/traefik-wazuh-bridge/events
+    state: directory
+    owner: '{{ var_tlw_service_user }}'
+    group: '{{ var_tlw_service_group }}'
+    mode: '0750'
+
+- name: Proteger configuración existente sin reescribir valores
+  ansible.builtin.file:
+    path: '{{ var_tlw_config_path }}'
+    state: file
+    owner: root
+    group: '{{ var_tlw_service_group }}'
+    mode: '0640'
+
+- name: Proteger SQLite existente sin modificar registros ni cursor
+  ansible.builtin.file:
+    path: '{{ var_tlw_state_path }}'
+    state: file
+    owner: '{{ var_tlw_service_user }}'
+    group: '{{ var_tlw_service_group }}'
+    mode: '0600'
+
+- name: Mantener JSONL existente con acceso restringido
+  ansible.builtin.file:
+    path: '{{ var_tlw_output_path }}'
+    state: file
+    owner: '{{ var_tlw_service_user }}'
+    group: '{{ var_tlw_service_group }}'
+    mode: '0640'
+
+- name: Actualizar el script SOLO con aprobación explícita y copia de respaldo
+  ansible.builtin.copy:
+    src: '{{ role_path }}/../../integrations/traefik_wazuh_bridge/bridge.py'
+    dest: '{{ var_tlw_script_path }}'
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  when: not (_tlw_script_matches | bool)
+  notify: Reiniciar puente tras cambio autorizado
+
+- name: Actualizar unidad systemd SOLO con aprobación explícita y backup
+  ansible.builtin.copy:
+    src: '{{ role_path }}/../../integrations/traefik_wazuh_bridge/traefik-wazuh-bridge.service'
+    dest: '{{ var_tlw_unit_path }}'
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  when: not (_tlw_unit_matches | bool)
+  notify:
+    - Recargar systemd tras cambio autorizado
+    - Reiniciar puente tras cambio autorizado
+
+- name: Actualizar exclusivamente loki_url conservando las demás claves
+  ansible.builtin.copy:
+    content: '{{ (_tlw_config | combine({"loki_url": _tlw_expected_loki_url}) | to_nice_json(indent=2)) ~ "\n" }}'
+    dest: '{{ var_tlw_config_path }}'
+    owner: root
+    group: '{{ var_tlw_service_group }}'
+    mode: '0640'
+    backup: true
+  no_log: true
+  when: not (_tlw_loki_url_matches | bool)
+  notify: Reiniciar puente tras cambio autorizado
+
+- name: Aplicar HelmChartConfig solo ante divergencia aprobada
+  ansible.builtin.copy:
+    src: '{{ role_path }}/../../manifests/traefik-access-logs.helmchartconfig.yaml'
+    dest: '{{ var_tlw_traefik_manifest }}'
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  when: not (_tlw_helm_matches | bool)
+  register: _tlw_helm_copy
+
+- name: Esperar convergencia semántica de HelmChartConfig
+  ansible.builtin.command:
+    argv:
+      - '{{ var_tlw_k3s_executable }}'
+      - kubectl
+      - -n
+      - '{{ var_tlw_traefik_namespace }}'
+      - get
+      - helmchartconfig
+      - traefik
+      - -o
+      - json
+  changed_when: false
+  register: _tlw_helm_check
+  until: >-
+    _tlw_helm_check.rc == 0 and
+    ((_tlw_helm_check.stdout | from_json).spec.valuesContent | from_yaml) == _tlw_expected_helm
+  retries: 24
+  delay: 5
+  when: _tlw_helm_copy is changed
+
+- name: Esperar rollout tras modificación explícita de Traefik
+  ansible.builtin.command:
+    argv:
+      - '{{ var_tlw_k3s_executable }}'
+      - kubectl
+      - -n
+      - '{{ var_tlw_traefik_namespace }}'
+      - rollout
+      - status
+      - deployment/traefik
+      - --timeout=180s
+  changed_when: false
+  when: _tlw_helm_copy is changed
+
+- name: Ejecutar handlers antes de validar el servicio
+  ansible.builtin.meta: flush_handlers
+
+- name: Confirmar que el puente permanece activo y habilitado
+  ansible.builtin.systemd_service:
+    name: '{{ var_tlw_service_name }}.service'
+    enabled: true
+    state: started
+
+- name: Resultado de adopción segura
+  ansible.builtin.debug:
+    msg:
+      - 'Puente adoptado, con estado SQLite y JSONL preservados.'
+      - 'Manager Wazuh: solo comprobación; NO se recreó ni reinició.'
+      - 'Sin docker compose up/down, prune ni cambios en reglas SSH.'

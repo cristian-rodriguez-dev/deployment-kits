@@ -1,5 +1,5 @@
 <!-- Add once inside the Wazuh Manager effective ossec.conf. Requires manager restart. -->
 <localfile>
   <log_format>json</log_format>
-  <location>/var/ossec/logs/traefik-bridge/traefik-access.jsonl</location>
+  <location>/var/ossec/traefik-bridge/traefik-access.jsonl</location>
 </localfile>

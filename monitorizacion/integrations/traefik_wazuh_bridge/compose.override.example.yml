@@ -3,4 +3,4 @@
 services:
   wazuh.manager:
     volumes:
-      - ${TRAEFIK_WAZUH_EVENTS_DIR:?set_host_events_dir}:/var/ossec/logs/traefik-bridge:ro
+      - ${TRAEFIK_WAZUH_EVENTS_DIR:?set_host_events_dir}:/var/ossec/traefik-bridge:ro

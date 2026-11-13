@@ -1,0 +1,44 @@
+---
+# Por defecto todas las operaciones son de solo lectura.
+var_tlw_mode: audit                         # audit | adopt
+var_tlw_apply: false                       # autorización explícita para adopt
+var_tlw_authorized_hosts:
+  - ansible_server
+
+# Se audita el proyecto REAL, no el nombre del directorio "single-node".
+var_tlw_compose_project: wazuh
+var_tlw_compose_dir: /home/servidor/instalacion/wazuh-docker/single-node
+var_tlw_compose_files:
+  - docker-compose.yml
+  - compose.credentials.yml
+  - compose.traefik-bridge.yml
+var_tlw_manager_container: wazuh-wazuh.manager-1
+var_tlw_manager_host_conf: /home/servidor/instalacion/wazuh-docker/single-node/config/wazuh_cluster/wazuh_manager.conf
+var_tlw_manager_logfile: /var/ossec/traefik-bridge/traefik-access.jsonl
+var_tlw_manager_rules: /var/ossec/etc/rules/traefik_rules.xml
+
+var_tlw_service_user: traefik-wazuh
+var_tlw_service_group: traefik-wazuh
+var_tlw_service_name: traefik-wazuh-bridge
+var_tlw_script_path: /opt/traefik-wazuh-bridge/bridge.py
+var_tlw_config_path: /etc/traefik-wazuh-bridge/config.json
+var_tlw_state_path: /var/lib/traefik-wazuh-bridge/state.sqlite
+var_tlw_output_path: /srv/traefik-wazuh-bridge/events/traefik-access.jsonl
+var_tlw_unit_path: /etc/systemd/system/traefik-wazuh-bridge.service
+
+var_tlw_k3s_executable: k3s
+var_tlw_loki_namespace: logging
+var_tlw_loki_service: loki
+var_tlw_loki_port: 3100
+var_tlw_traefik_namespace: kube-system
+var_tlw_traefik_manifest: /var/lib/rancher/k3s/server/manifests/traefik-config.yaml
+
+# Aprobaciones independientes; no activarlas en la plantilla de auditoría.
+var_tlw_allow_bridge_file_update: false
+var_tlw_allow_loki_url_update: false
+var_tlw_allow_service_restart: false
+var_tlw_allow_traefik_update: false
+var_tlw_ack_traefik_rollout: false
+
+# No existe una operación de escritura/recreación del Manager en este rol.
+# La integración de Wazuh se adopta y verifica en solo lectura.

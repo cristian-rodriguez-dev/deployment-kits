@@ -1,0 +1,47 @@
+[35mmonitorizacion/AGENTES.md[m[36m:[m[32m34[m[36m:[m  - "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus:/etc/prometheus:ro"
+[35mmonitorizacion/AGENTES.md[m[36m:[m[32m35[m[36m:[m  - "{{ [1;31mvar_prometheus_install_dir[m }}/data:/prometheus"
+[35mmonitorizacion/AGENTES.md[m[36m:[m[32m140[m[36m:[m# [1;31mvar_prometheus_install_dir[m (Ruta absoluta de instalación)
+[35mmonitorizacion/README_DESPLIEGUE_AWX.md[m[36m:[m[32m274[m[36m:[m[1;31mvar_prometheus_install_dir[m: /home/pruebas/instalacion/prometheus_server
+[35mmonitorizacion/TRIAGE_METRICS_AWX.md[m[36m:[m[32m23[m[36m:[m[1;31mvar_prometheus_install_dir[m: /home/servidor/instalacion/prometheus_server
+[35mmonitorizacion/examples/variables_prometheus.yml[m[36m:[m[32m4[m[36m:[m# [1;31mvar_prometheus_install_dir[m: /ruta/absoluta/prometheus_server
+[35mmonitorizacion/playbooks/configurar_agentes_prometheus.yml[m[36m:[m[32m11[m[36m:[m          - [1;31mvar_prometheus_install_dir[m is defined
+[35mmonitorizacion/playbooks/configurar_agentes_prometheus.yml[m[36m:[m[32m25[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/docker-compose.yml"
+[35mmonitorizacion/playbooks/configurar_agentes_prometheus.yml[m[36m:[m[32m56[m[36m:[m        dest: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/prometheus.yml"
+[35mmonitorizacion/playbooks/configurar_agentes_prometheus.yml[m[36m:[m[32m98[m[36m:[m        project_src: "{{ [1;31mvar_prometheus_install_dir[m }}"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m14[m[36m:[m          - [1;31mvar_prometheus_install_dir[m is defined
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m15[m[36m:[m          - ([1;31mvar_prometheus_install_dir[m | default('')) is match('^/')
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m16[m[36m:[m          - ([1;31mvar_prometheus_install_dir[m | default('')) != '/'
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m19[m[36m:[m          una ruta absoluta no raiz en [1;31mvar_prometheus_install_dir[m.
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m23[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m28[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/docker-compose.yml"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m33[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/prometheus.yml"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m38[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/data"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m102[m[36m:[m          - [1;31mvar_prometheus_install_dir[m is defined
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m126[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/prometheus.yml"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m132[m[36m:[m        src: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/prometheus.yml"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m159[m[36m:[m          - [1;31mvar_prometheus_install_dir[m is match('^/')
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m160[m[36m:[m          - [1;31mvar_prometheus_install_dir[m != '/'
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m200[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/triage_metrics_token"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m243[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m251[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m259[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/data"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m284[m[36m:[m        dest: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/prometheus.yml"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m295[m[36m:[m          --volume {{ [1;31mvar_prometheus_install_dir[m }}/prometheus:/etc/prometheus:ro
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m304[m[36m:[m        dest: "{{ [1;31mvar_prometheus_install_dir[m }}/docker-compose.yml"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m316[m[36m:[m        project_src: "{{ [1;31mvar_prometheus_install_dir[m }}"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m347[m[36m:[m          - "Directorio: {{ [1;31mvar_prometheus_install_dir[m }}"
+[35mmonitorizacion/playbooks/instalar_prometheus.yml[m[36m:[m[32m361[m[36m:[m        chdir: "{{ [1;31mvar_prometheus_install_dir[m }}"
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m14[m[36m:[m    var_triage_metrics_token_path: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/triage_metrics_token"
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m21[m[36m:[m          - [1;31mvar_prometheus_install_dir[m is defined
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m23[m[36m:[m          - [1;31mvar_prometheus_install_dir[m is match('^/[^\n]+$')
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m25[m[36m:[m          - [1;31mvar_prometheus_install_dir[m != '/'
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m27[m[36m:[m          - var_triage_bot_install_dir != [1;31mvar_prometheus_install_dir[m
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m40[m[36m:[m        path: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/prometheus.yml"
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m60[m[36m:[m        src: "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus/prometheus.yml"
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m126[m[36m:[m        - "{{ [1;31mvar_prometheus_install_dir[m }}/compose.metrics.yml"
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m179[m[36m:[m            dest: "{{ [1;31mvar_prometheus_install_dir[m }}/compose.metrics.yml"
+[35mmonitorizacion/playbooks/integrar_security_triage_metrics.yml[m[36m:[m[32m200[m[36m:[m            - "{{ [1;31mvar_prometheus_install_dir[m }}/compose.metrics.yml"
+[35mmonitorizacion/templates/prometheus/docker-compose.yml.j2[m[36m:[m[32m15[m[36m:[m      - "{{ [1;31mvar_prometheus_install_dir[m }}/prometheus:/etc/prometheus:ro"
+[35mmonitorizacion/templates/prometheus/docker-compose.yml.j2[m[36m:[m[32m18[m[36m:[m      - "{{ [1;31mvar_prometheus_install_dir[m }}/data:/prometheus"
+Binary file [35mtests/__pycache__/test_triage_metrics_awx.cpython-313-pytest-9.2.0.pyc[m matches
+[35mtests/test_triage_metrics_awx.py[m[36m:[m[32m38[m[36m:[m        self.assertIn('--volume {{ [1;31mvar_prometheus_install_dir[m }}/prometheus:/etc/prometheus:ro', s)

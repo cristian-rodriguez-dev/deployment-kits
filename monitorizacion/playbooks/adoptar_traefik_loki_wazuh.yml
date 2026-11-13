@@ -1,0 +1,12 @@
+---
+- name: Adopción segura y controlada de Traefik Loki Wazuh
+  hosts: ansible_server
+  become: true
+  gather_facts: true
+  serial: 1
+  tasks:
+    - name: Adoptar servicios ya instalados únicamente con permiso explícito
+      ansible.builtin.include_role:
+        name: traefik_loki_wazuh
+      vars:
+        var_tlw_mode: adopt

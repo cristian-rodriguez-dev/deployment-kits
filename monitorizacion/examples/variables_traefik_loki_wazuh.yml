@@ -1,0 +1,9 @@
+---
+# Extra vars para una plantilla AWX de adopción sobre el laboratorio VALIDADO.
+# No activar las opciones de actualización sin un diff revisado y ventana autorizada.
+var_tlw_apply: true
+var_tlw_allow_bridge_file_update: false
+var_tlw_allow_loki_url_update: false
+var_tlw_allow_service_restart: false
+var_tlw_allow_traefik_update: false
+var_tlw_ack_traefik_rollout: false

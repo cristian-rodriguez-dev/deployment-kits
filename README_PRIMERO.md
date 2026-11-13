@@ -1,13 +1,13 @@
 # Paquete de preparación — Traefik / Loki / Wazuh
 
-**No hay despliegue automático.** Este ZIP contiene **solo archivos nuevos** que se extraen en la raíz de `deployment-kits` sin sobrescribir los existentes.
+**Este paquete es un punto de partida para la automatización.** Se validó el despliegue manual en noviembre de 2026; no ejecutar directamente sobre producción sin revisar el estado real. No contiene secretos ni datos de SQLite/JSONL.
 
-Estado validado fuera de este paquete: Traefik access logs JSON → Alloy → Loki (dos entradas de `/dashboard`, HTTP 401) y Wazuh `wazuh-logtest` decodificando los campos JSON. Aún falta habilitar la entrega de logs al Manager y validar las reglas nuevas.
+Estado validado: Traefik access logs JSON → Alloy → Loki; puente systemd con JSONL y SQLite; Manager Wazuh leyendo el JSONL y alerta real `100601` (nivel 7). Correlaciones `100603` y `100605` y gestión declarativa desde AWX pendientes. Detalle: montaje efectivo `/var/ossec/traefik-bridge` y proyecto Compose `wazuh` (obligatorio `-p wazuh`).
 
 1. Extraer en raíz `deployment-kits/` evitando incluir o copiar `.git`.
 2. Leer `monitorizacion/docs/TRAEFIK_LOKI_WAZUH.md` (riesgos, fases y comandos de ensayo).
 3. Validar las pruebas offline: `python3 -m unittest discover -s tests -p 'test_traefik_wazuh_bridge.py' -v`.
-4. No editar Compose/Manager ni ejecutar el servicio systemd hasta confirmar endpoint estable de Loki, bind mount seguro y ventana de aplicación.
+4. No recrear Docker ni volver a instalar el puente por defecto: primero adoptar la instalación existente, verificar diferencias y exigir aprobación para cambios que requieran recreación.
 
 ## Cambios de configuración
 

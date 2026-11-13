@@ -1,0 +1,259 @@
+---
+- name: Verificar sistema operativo
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['system'] == 'Linux'
+      - ansible_facts['distribution'] == 'Ubuntu'
+    fail_msg: 'El rol solo está preparado para el servidor Ubuntu validado.'
+
+- name: Consultar usuario de servicio
+  ansible.builtin.command:
+    argv: [id, -u, '{{ var_tlw_service_user }}']
+  changed_when: false
+  failed_when: false
+  register: _tlw_user
+
+- name: Consultar grupo de servicio
+  ansible.builtin.command:
+    argv: [getent, group, '{{ var_tlw_service_group }}']
+  changed_when: false
+  failed_when: false
+  register: _tlw_group
+  no_log: true
+
+- name: Comprobar archivos protegidos del puente y del Manager
+  ansible.builtin.stat:
+    path: '{{ item.path }}'
+    follow: false
+    get_checksum: '{{ item.checksum | default(false) }}'
+  loop:
+    - {path: '{{ var_tlw_script_path }}', checksum: true}
+    - {path: '{{ var_tlw_unit_path }}', checksum: true}
+    - {path: '{{ var_tlw_config_path }}'}
+    - {path: '{{ var_tlw_state_path }}'}
+    - {path: '{{ var_tlw_output_path }}'}
+    - {path: '{{ var_tlw_manager_host_conf }}'}
+    - {path: '{{ var_tlw_traefik_manifest }}'}
+    - {path: '{{ var_tlw_compose_dir }}/docker-compose.yml'}
+    - {path: '{{ var_tlw_compose_dir }}/compose.credentials.yml'}
+    - {path: '{{ var_tlw_compose_dir }}/compose.traefik-bridge.yml'}
+  loop_control:
+    label: '{{ item.path }}'
+  register: _tlw_stats
+
+- name: Crear mapa en memoria de las rutas existentes
+  ansible.builtin.set_fact:
+    _tlw_files: '{{ dict(_tlw_stats.results | map(attribute="item.path") | zip(_tlw_stats.results | map(attribute="stat"))) }}'
+  no_log: true
+
+- name: Validar requisitos básicos de auditoría
+  ansible.builtin.assert:
+    that:
+      - _tlw_user.rc == 0
+      - _tlw_group.rc == 0
+      - _tlw_files[var_tlw_config_path].isreg | default(false)
+      - not (_tlw_files[var_tlw_config_path].islnk | default(false))
+      - _tlw_files[var_tlw_state_path].isreg | default(false)
+      - not (_tlw_files[var_tlw_state_path].islnk | default(false))
+      - _tlw_files[var_tlw_output_path].isreg | default(false)
+      - not (_tlw_files[var_tlw_output_path].islnk | default(false))
+      - _tlw_files[var_tlw_script_path].isreg | default(false)
+      - _tlw_files[var_tlw_unit_path].isreg | default(false)
+      - _tlw_files[var_tlw_manager_host_conf].isreg | default(false)
+      - not (_tlw_files[var_tlw_manager_host_conf].islnk | default(false))
+      - _tlw_files[var_tlw_traefik_manifest].isreg | default(false)
+      - not (_tlw_files[var_tlw_traefik_manifest].islnk | default(false))
+    fail_msg: 'Instalación incompleta, archivos faltantes o enlace simbólico peligroso; no adoptar.'
+
+- name: Leer la configuración JSON existente sin mostrar su contenido
+  ansible.builtin.slurp:
+    src: '{{ var_tlw_config_path }}'
+  register: _tlw_config_raw
+  no_log: true
+
+- name: Interpretar parámetros existentes sin alterar nada
+  ansible.builtin.set_fact:
+    _tlw_config: '{{ _tlw_config_raw.content | b64decode | from_json }}'
+  no_log: true
+
+- name: Leer estado de servicio systemd
+  ansible.builtin.command:
+    argv: [systemctl, is-active, '{{ var_tlw_service_name }}.service']
+  register: _tlw_service_active
+  changed_when: false
+  failed_when: false
+
+- name: Leer habilitación de servicio systemd
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, '{{ var_tlw_service_name }}.service']
+  register: _tlw_service_enabled
+  changed_when: false
+  failed_when: false
+
+- name: Resolver ClusterIP de Loki desde Kubernetes
+  ansible.builtin.command:
+    argv:
+      - '{{ var_tlw_k3s_executable }}'
+      - kubectl
+      - -n
+      - '{{ var_tlw_loki_namespace }}'
+      - get
+      - svc
+      - '{{ var_tlw_loki_service }}'
+      - -o
+      - 'jsonpath={.spec.clusterIP}'
+  register: _tlw_loki_ip
+  changed_when: false
+  failed_when: false
+
+- name: Obtener HelmChartConfig de Traefik sin cambiar el clúster
+  ansible.builtin.command:
+    argv:
+      - '{{ var_tlw_k3s_executable }}'
+      - kubectl
+      - -n
+      - '{{ var_tlw_traefik_namespace }}'
+      - get
+      - helmchartconfig
+      - traefik
+      - -o
+      - json
+  register: _tlw_helm_live
+  changed_when: false
+  failed_when: false
+
+- name: Obtener metadatos del contenedor Manager original
+  ansible.builtin.command:
+    argv: [docker, inspect, '{{ var_tlw_manager_container }}']
+  register: _tlw_manager_inspect
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Resolver Compose con argumentos -f separados
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -p
+      - '{{ var_tlw_compose_project }}'
+      - -f
+      - '{{ var_tlw_compose_dir }}/docker-compose.yml'
+      - -f
+      - '{{ var_tlw_compose_dir }}/compose.credentials.yml'
+      - -f
+      - '{{ var_tlw_compose_dir }}/compose.traefik-bridge.yml'
+      - config
+      - --format
+      - json
+    chdir: '{{ var_tlw_compose_dir }}'
+  register: _tlw_compose_safe
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Leer hash de las reglas activas dentro del Manager
+  ansible.builtin.command:
+    argv: [docker, exec, '{{ var_tlw_manager_container }}', sha256sum, '{{ var_tlw_manager_rules }}']
+  register: _tlw_rules_hash
+  changed_when: false
+  failed_when: false
+
+- name: Consultar acceso de lectura desde Manager al JSONL
+  ansible.builtin.command:
+    argv: [docker, exec, '{{ var_tlw_manager_container }}', test, -r, '{{ var_tlw_manager_logfile }}']
+  register: _tlw_manager_can_read
+  changed_when: false
+  failed_when: false
+
+- name: Comprobar que el Manager cargó el localfile esperado
+  ansible.builtin.command:
+    argv: [docker, exec, '{{ var_tlw_manager_container }}', grep, -F, '{{ var_tlw_manager_logfile }}', /var/ossec/etc/ossec.conf]
+  register: _tlw_manager_running_conf
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Verificar XML original del Manager sin cambiarlo
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json, re, sys, xml.etree.ElementTree as ET
+        from pathlib import Path
+        s=Path(sys.argv[1]).read_text(encoding='utf-8')
+        s=re.sub(r'^\s*<\?xml[^>]*\?>', '', s, count=1)
+        root=ET.fromstring('<document>'+s+'</document>')
+        matches=[e for e in root.findall('.//localfile') if (e.findtext('location') or '').strip()==sys.argv[2]]
+        print(json.dumps({'blocks':len(root.findall('ossec_config')),
+                          'matches':len(matches),
+                          'json':len(matches)==1 and (matches[0].findtext('log_format') or '').strip()=='json'}))
+      - '{{ var_tlw_manager_host_conf }}'
+      - '{{ var_tlw_manager_logfile }}'
+  register: _tlw_manager_xml
+  changed_when: false
+  failed_when: false
+
+- name: Confirmar disponibilidad de metadatos imprescindibles
+  ansible.builtin.assert:
+    that:
+      - _tlw_loki_ip.rc == 0
+      - _tlw_loki_ip.stdout not in ['', 'None']
+      - _tlw_helm_live.rc == 0
+      - _tlw_manager_inspect.rc == 0
+      - _tlw_compose_safe.rc == 0
+      - _tlw_rules_hash.rc == 0
+      - _tlw_manager_xml.rc == 0
+    fail_msg: 'No se pudo consultar Loki, Traefik, Manager, Compose o reglas; no adoptar.'
+
+- name: Derivar comparaciones no sensibles
+  ansible.builtin.set_fact:
+    _tlw_expected_loki_url: 'http://{{ _tlw_loki_ip.stdout }}:{{ var_tlw_loki_port }}'
+    _tlw_expected_helm: '{{ (lookup("ansible.builtin.file", role_path ~ "/../../manifests/traefik-access-logs.helmchartconfig.yaml", rstrip=False) | from_yaml).spec.valuesContent | from_yaml }}'
+    _tlw_actual_helm: '{{ ((_tlw_helm_live.stdout | from_json).spec.valuesContent) | from_yaml }}'
+    _tlw_compose: '{{ _tlw_compose_safe.stdout | from_json }}'
+    _tlw_manager_info: '{{ (_tlw_manager_inspect.stdout | from_json)[0] }}'
+    _tlw_manager_xml_info: '{{ _tlw_manager_xml.stdout | from_json }}'
+    _tlw_expected_script_sha1: '{{ lookup("ansible.builtin.file", role_path ~ "/../../integrations/traefik_wazuh_bridge/bridge.py", rstrip=False) | hash("sha1") }}'
+    _tlw_expected_unit_sha1: '{{ lookup("ansible.builtin.file", role_path ~ "/../../integrations/traefik_wazuh_bridge/traefik-wazuh-bridge.service", rstrip=False) | hash("sha1") }}'
+    _tlw_expected_rules_sha256: '{{ lookup("ansible.builtin.file", role_path ~ "/../../integrations/traefik_wazuh_bridge/traefik_rules.xml", rstrip=False) | hash("sha256") }}'
+  no_log: true
+
+- name: Calcular integridad y estado de adopción
+  ansible.builtin.set_fact:
+    _tlw_script_matches: '{{ (_tlw_files[var_tlw_script_path].checksum | default("")) == _tlw_expected_script_sha1 }}'
+    _tlw_unit_matches: '{{ (_tlw_files[var_tlw_unit_path].checksum | default("")) == _tlw_expected_unit_sha1 }}'
+    _tlw_rules_match: '{{ _tlw_rules_hash.stdout.split()[0] == _tlw_expected_rules_sha256 }}'
+    _tlw_loki_url_matches: '{{ _tlw_config.get("loki_url") == _tlw_expected_loki_url }}'
+    _tlw_helm_matches: '{{ _tlw_expected_helm == _tlw_actual_helm }}'
+    _tlw_compose_project_ok: '{{ _tlw_compose.name == var_tlw_compose_project and _tlw_manager_info.Config.Labels["com.docker.compose.project"] == var_tlw_compose_project }}'
+    _tlw_manager_read_ok: '{{ _tlw_manager_can_read.rc == 0 }}'
+    _tlw_manager_running_ok: '{{ _tlw_manager_running_conf.rc == 0 }}'
+    _tlw_manager_localfile_ok: '{{ _tlw_manager_xml_info.matches == 1 and _tlw_manager_xml_info.json }}'
+    _tlw_config_paths_ok: '{{ _tlw_config.get("output_path") == var_tlw_output_path and _tlw_config.get("state_path") == var_tlw_state_path }}'
+  no_log: true
+
+- name: Verificar integridad física de los tres volúmenes de Wazuh
+  ansible.builtin.assert:
+    that:
+      - (_tlw_compose.volumes.wazuh_etc.name | default('')) == 'wazuh_wazuh_etc'
+      - (_tlw_compose.volumes.wazuh_logs.name | default('')) == 'wazuh_wazuh_logs'
+      - (_tlw_compose.volumes.wazuh_active_response.name | default('')) == 'wazuh_wazuh_active_response'
+      - (_tlw_manager_info.Mounts | selectattr('Destination', 'equalto', '/var/ossec/etc') | map(attribute='Name') | first | default('')) == 'wazuh_wazuh_etc'
+      - (_tlw_manager_info.Mounts | selectattr('Destination', 'equalto', '/var/ossec/logs') | map(attribute='Name') | first | default('')) == 'wazuh_wazuh_logs'
+      - (_tlw_manager_info.Mounts | selectattr('Destination', 'equalto', '/var/ossec/active-response/bin') | map(attribute='Name') | first | default('')) == 'wazuh_wazuh_active_response'
+      - (_tlw_compose.services['wazuh.manager'].volumes | selectattr('target', 'equalto', '/var/ossec/traefik-bridge') | map(attribute='source') | first | default('')) == '/srv/traefik-wazuh-bridge/events'
+      - (_tlw_compose.services['wazuh.manager'].volumes | selectattr('target', 'equalto', '/var/ossec/traefik-bridge') | map(attribute='read_only') | first | default(false)) | bool
+      - (_tlw_manager_info.Mounts | selectattr('Destination', 'equalto', '/var/ossec/traefik-bridge') | map(attribute='RW') | first | default(true)) == false
+    fail_msg: 'Volúmenes originales, Compose o bind mount en desacuerdo; detener adopción.'
+
+- name: Resumen de auditoría sin secretos ni escrituras
+  ansible.builtin.debug:
+    msg:
+      - 'Modo={{ var_tlw_mode }}; host={{ inventory_hostname }}; manager={{ var_tlw_manager_container }}; proyecto_correcto={{ _tlw_compose_project_ok }}'
+      - 'Puente: servicio={{ _tlw_service_active.stdout | trim }}, habilitado={{ _tlw_service_enabled.stdout | trim }}, script_git={{ _tlw_script_matches }}, unidad_git={{ _tlw_unit_matches }}'
+      - 'SQLite={{ _tlw_files[var_tlw_state_path].exists }}, JSONL={{ _tlw_files[var_tlw_output_path].exists }}, rutas_config={{ _tlw_config_paths_ok }}'
+      - 'Loki={{ _tlw_expected_loki_url }}; URL_config_correcta={{ _tlw_loki_url_matches }}; Traefik_config={{ _tlw_helm_matches }}'
+      - 'Manager: JSONL_legible={{ _tlw_manager_read_ok }}, localfile={{ _tlw_manager_localfile_ok }}, config_cargada={{ _tlw_manager_running_ok }}, reglas_git={{ _tlw_rules_match }}'
+      - 'No se ejecutan docker compose up/down, reinicios del Manager, limpieza ni alteraciones de SQLite/JSONL.'

@@ -1,0 +1,10 @@
+---
+- name: Recargar systemd tras cambio autorizado
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Reiniciar puente tras cambio autorizado
+  ansible.builtin.systemd_service:
+    name: '{{ var_tlw_service_name }}.service'
+    state: restarted
+  when: var_tlw_allow_service_restart | bool

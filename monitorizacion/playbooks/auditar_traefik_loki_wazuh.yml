@@ -1,0 +1,11 @@
+---
+- name: Auditoría read-only de Traefik Loki Wazuh existente
+  hosts: ansible_server
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Auditar integración sin modificar servicios
+      ansible.builtin.include_role:
+        name: traefik_loki_wazuh
+      vars:
+        var_tlw_mode: audit

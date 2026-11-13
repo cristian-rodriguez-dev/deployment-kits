@@ -1,0 +1,94 @@
+--- a/monitorizacion/integrations/traefik_wazuh_bridge/wazuh-localfile.xml
++++ b/monitorizacion/integrations/traefik_wazuh_bridge/wazuh-localfile.xml
+@@ -1,5 +1,5 @@
+ <!-- Add once inside the Wazuh Manager effective ossec.conf. Requires manager restart. -->
+ <localfile>
+   <log_format>json</log_format>
+-  <location>/var/ossec/logs/traefik-bridge/traefik-access.jsonl</location>
++  <location>/var/ossec/traefik-bridge/traefik-access.jsonl</location>
+ </localfile>
+--- a/monitorizacion/integrations/traefik_wazuh_bridge/compose.override.example.yml
++++ b/monitorizacion/integrations/traefik_wazuh_bridge/compose.override.example.yml
+@@ -3,4 +3,4 @@
+ services:
+   wazuh.manager:
+     volumes:
+-      - ${TRAEFIK_WAZUH_EVENTS_DIR:?set_host_events_dir}:/var/ossec/logs/traefik-bridge:ro
++      - ${TRAEFIK_WAZUH_EVENTS_DIR:?set_host_events_dir}:/var/ossec/traefik-bridge:ro
+--- a/monitorizacion/docs/TRAEFIK_LOKI_WAZUH.md
++++ b/monitorizacion/docs/TRAEFIK_LOKI_WAZUH.md
+@@ -1,6 +1,6 @@
+ # Traefik → Alloy → Loki → Wazuh (modo detección)
+ 
+-**Estado (12-11-2026):** probado `Traefik → Alloy → Loki` (peticiones `/dashboard`, HTTP 401, 2 entradas JSON en Loki); Wazuh 4.14.8 decodifica correctamente los campos JSON con `wazuh-logtest`. **Este paquete no se ha desplegado**: puente Loki → archivo, ingestión efectiva por Manager, nuevas reglas y reinicio siguen pendientes. No habilita Active Response web.
++**Estado validado (13-11-2026):** Traefik 3.7.13 genera access logs JSON; Alloy los entrega a Loki y se han registrado 3/3 peticiones HTTPS 401 en una prueba controlada. El puente Python funciona como servicio `traefik-wazuh-bridge` (activo y habilitado), almacena cursor SQLite y escribe JSONL filtrado. El Manager Wazuh original (proyecto Compose `wazuh`) tiene un bind mount de solo lectura a `/var/ossec/traefik-bridge`, lee `traefik-access.jsonl` y carga las reglas `100600–100605`. Una entrada sintética a `/.env` añadida al JSONL produjo una **alerta real 100601 de nivel 7**. La correlación `100603` (8 eventos/120 s) y `100605` (15 eventos/120 s) **no se han probado extremo a extremo**. No hay Active Response para HTTP; el piloto SSH del agente `005` sigue separado. **Automatización Ansible/AWX de esta nueva integración: pendiente**.
+ 
+ ## Propósito y alcance
+ 
+@@ -19,8 +19,8 @@
+ - `traefik-wazuh-bridge.service`: ejemplo de servicio systemd bajo usuario sin privilegios.
+ - `compose.override.example.yml`: ejemplo de bind mount de logs en el servicio `wazuh.manager` sin alterar otros volúmenes.
+ - `wazuh-localfile.xml`: entrada que añadir al `ossec.conf` real del Manager.
+-- `traefik_rules.xml`: reglas de Wazuh **para validar, no aplicadas**.
+-- `monitorizacion/manifests/traefik-access-logs.helmchartconfig.yaml`: versión declarativa de la configuración Traefik que ya está activa en K3s.
++- `traefik_rules.xml`: reglas Wazuh instaladas y validadas en el Manager; validar diferencias antes de cualquier actualización.
++- `monitorizacion/manifests/traefik-access-logs.helmchartconfig.yaml`: versión declarativa del HelmChartConfig activo en K3s (Chart 40.1.5+up40.1.0).
+ - `tests/test_traefik_wazuh_bridge.py`: pruebas offline, sin conexiones ni modificaciones de servicios.
+ 
+ ## Comprobación local, segura y sin despliegue
+@@ -47,15 +47,15 @@
+ 
+ `--dry-run` solo consulta Loki; no crea base de datos ni escribe registros para Wazuh. El número de eventos seleccionados puede incluir duplicados entre ventanas solapadas: **no** es una prueba de entrega ni de alertas Wazuh. Cerrar el port-forward tras la prueba. Para un servicio continuo debe existir una URL Loki estable, accesible y **no pública** desde el host (verificarla antes; NO utilizar port-forward como dependencia permanente).
+ 
+-## Activación planeada (NO ejecutar automáticamente)
++## Despliegue manual validado y requisitos para automatizar
+ 
+ 1. Preparar un directorio restringido de eventos en el host, p. ej. `/srv/traefik-wazuh-bridge/events`, y un directorio separado de estado `/var/lib/traefik-wazuh-bridge`. Crear usuario de servicio sin acceso a Docker y aplicar permisos mínimos. Proteger el archivo de salida, ya que las rutas HTTP podrían contener datos sensibles incluso tras retirar los parámetros de consulta. No copiar a Git los eventos, el estado ni las credenciales.
+ 2. Configurar `loki_url` con una dirección interna estable y accesible desde el host, preferentemente con TLS y controles de red. Validar `/ready` y una consulta `query_range` antes de arrancar el servicio.
+-3. Mediante **override documentado de Compose**, montar el directorio de eventos del host en el servicio `wazuh.manager` como `:ro` en `/var/ossec/logs/traefik-bridge`. La modificación del montaje recreará el contenedor Manager; exigir ventana de mantenimiento y backup del Compose original. Respetar todos los volúmenes actuales; nunca `down -v`.
+-4. Verificar que el archivo `traefik-access.jsonl` existe y es legible en el contenedor. Añadir el bloque `wazuh-localfile.xml` al `wazuh_manager.conf` persistente real (host: `single-node/config/wazuh_cluster/wazuh_manager.conf`); su montaje se realiza a través de `/wazuh-config-mount/etc/ossec.conf`. Revisar configuración XML completa y planificar reinicio controlado del Manager.
+-5. Copiar `traefik_rules.xml` a un fichero independiente bajo `/var/ossec/etc/rules/` (volumen persistente). **Antes**, comprobar colisiones en el rango de reglas `100600–100605`, validar XML y probar ejemplos con `wazuh-logtest`. La incorporación de reglas a la detección activa requiere recargar/reiniciar Wazuh Manager de forma controlada.
+-6. Activar servicio systemd del puente, monitorizar logs de su propia unidad, estado SQLite, tamaño del JSONL, Loki y Wazuh; validar emisión real de alertas de prueba. Desplegar/actualizar con Ansible/AWX en una etapa posterior; no mezclar este cambio con el piloto de Active Response SSH del agente `005`.
+-7. Incorporar el YAML de Traefik a la gestión declarativa por AWX, con estrategia de **adopción**: comparar primero contra `HelmChartConfig` del clúster; no aplicar si hubiera personalizaciones divergentes ni reinstalar Traefik desde cero.
++3. El override `compose.traefik-bridge.yml` ya monta `/srv/traefik-wazuh-bridge/events` en `/var/ossec/traefik-bridge` como solo lectura. En la automatización, **fijar `-p wazuh`** y los tres archivos `docker-compose.yml`, `compose.credentials.yml` y `compose.traefik-bridge.yml`; nunca depender del nombre del directorio `single-node` como proyecto. En un intento anterior sin `-p`, Docker creó el proyecto erróneo `single-node`, con un contenedor `Created` y volúmenes nuevos; se deben revisar y limpiar **solo** esos recursos verificados, sin `prune` ni `down -v`. El Manager original `wazuh` siguió operativo y luego fue recreado correctamente con `-p wazuh` y sus volúmenes originales.
++4. Archivo de eventos validado como legible en el contenedor; el Manager tiene activo el `<localfile>` para `/var/ossec/traefik-bridge/traefik-access.jsonl`. Su fichero de origen es `single-node/config/wazuh_cluster/wazuh_manager.conf`, que contiene **dos bloques `<ossec_config>`**; automatizar la inserción XML sin dar por hecho que solo hay uno, con backup y comparación exacta. No repetir el reinicio si no hay cambios.
++5. `traefik_rules.xml` ya está copiado a `/var/ossec/etc/rules/traefik_rules.xml` (volumen persistente). No se encontraron colisiones de IDs `100600–100605`; `wazuh-analysisd -t` pasó y `wazuh-logtest` coincidió con la regla `100601` (nivel 7). Adoptar archivos existentes antes de imponer cambios; cambios reales de reglas exigen control de versiones y reinicio autorizado.
++6. `traefik-wazuh-bridge.service` ya está activo/habilitado como `traefik-wazuh` sin acceso al Docker socket. Escribe en `/srv/traefik-wazuh-bridge/events/traefik-access.jsonl` y mantiene SQLite en `/var/lib/traefik-wazuh-bridge/state.sqlite`. La URL Loki de laboratorio es `http://10.43.213.25:3100`, pero **no fijarla en el repositorio como endpoint permanente**; resolverla/validarla mediante el servicio Kubernetes. Vigilar errores de systemd, disponibilidad Loki y tamaño del JSONL.
++7. Próximo bloque: Ansible/AWX con estrategia **adoptar → comparar → gestionar**; inicialmente sin escrituras ni recreaciones, después con aprobación explícita para cambios del Manager. Incorporar el YAML de Traefik a la gestión declarativa sin reinstalar Traefik ni pisar personalizaciones. Sincronizar README, procedimientos de recuperación y documentación de red/seguridad/almacenamiento antes del commit.
+ 
+ ### Riesgos y límites de la primera iteración
+ 
+@@ -67,7 +67,7 @@
+ - Si el usuario no ha solicitado expresamente desplegar, conservar las operaciones en modo de lectura/ensayo.
+ - Tras un cambio de Loki, Traefik, Wazuh o reglas, actualizar README/ADRs y el contrato de almacenamiento o seguridad aplicable **antes del commit**.
+ 
+-## Ejemplos para `wazuh-logtest` (cuando el archivo de reglas esté preparado)
++## Ejemplos reproducibles para `wazuh-logtest`
+ 
+ Solicitud de ruta sensible: debe coincidir con la regla `100601`:
+ 
+@@ -89,4 +89,4 @@
+ - No crear `DROP` automáticos por un 401/403 aislado.
+ - No publicar Loki en internet ni dar al puente acceso al Docker socket.
+ - No editar volúmenes internos Docker usando rutas de `_data` directamente.
+-- No confirmar una integración E2E a Wazuh sin haber verificado que el Manager consume el archivo y genera una alerta real.
++- No confundir la alerta real `100601` desde un evento JSONL sintético con la validación de correlaciones HTTP `100603`/`100605`, aún pendientes.
+--- a/README_PRIMERO.md
++++ b/README_PRIMERO.md
+@@ -1,13 +1,13 @@
+ # Paquete de preparación — Traefik / Loki / Wazuh
+ 
+-**No hay despliegue automático.** Este ZIP contiene **solo archivos nuevos** que se extraen en la raíz de `deployment-kits` sin sobrescribir los existentes.
++**Este paquete es un punto de partida para la automatización.** Se validó el despliegue manual en noviembre de 2026; no ejecutar directamente sobre producción sin revisar el estado real. No contiene secretos ni datos de SQLite/JSONL.
+ 
+-Estado validado fuera de este paquete: Traefik access logs JSON → Alloy → Loki (dos entradas de `/dashboard`, HTTP 401) y Wazuh `wazuh-logtest` decodificando los campos JSON. Aún falta habilitar la entrega de logs al Manager y validar las reglas nuevas.
++Estado validado: Traefik access logs JSON → Alloy → Loki; puente systemd con JSONL y SQLite; Manager Wazuh leyendo el JSONL y alerta real `100601` (nivel 7). Correlaciones `100603` y `100605` y gestión declarativa desde AWX pendientes. Detalle: montaje efectivo `/var/ossec/traefik-bridge` y proyecto Compose `wazuh` (obligatorio `-p wazuh`).
+ 
+ 1. Extraer en raíz `deployment-kits/` evitando incluir o copiar `.git`.
+ 2. Leer `monitorizacion/docs/TRAEFIK_LOKI_WAZUH.md` (riesgos, fases y comandos de ensayo).
+ 3. Validar las pruebas offline: `python3 -m unittest discover -s tests -p 'test_traefik_wazuh_bridge.py' -v`.
+-4. No editar Compose/Manager ni ejecutar el servicio systemd hasta confirmar endpoint estable de Loki, bind mount seguro y ventana de aplicación.
++4. No recrear Docker ni volver a instalar el puente por defecto: primero adoptar la instalación existente, verificar diferencias y exigir aprobación para cambios que requieran recreación.
+ 
+ ## Cambios de configuración
+ 

@@ -1,0 +1,14 @@
+---
+- name: Comprobar modo y equipo autorizado
+  ansible.builtin.assert:
+    that:
+      - var_tlw_mode in ['audit', 'adopt']
+      - inventory_hostname in var_tlw_authorized_hosts
+    fail_msg: 'Modo no autorizado o host fuera de la lista aprobada.'
+
+- name: Auditar integración existente sin escrituras
+  ansible.builtin.import_tasks: audit.yml
+
+- name: Adoptar únicamente con aprobación explícita
+  ansible.builtin.import_tasks: adopt.yml
+  when: var_tlw_mode == 'adopt'
