@@ -1,27 +1,84 @@
-# Bloque 08 — Protección del Job 05 (Grafana legado)
+# Pilas Observabilidad — `deployment-kits` (laboratorio heredado)
 
-**Objetivo**: impedir que el instalador original sobrescriba por accidente el Compose SMTP o la DB/alertas de Grafana ya operativo. Este paquete **NO despliega ni modifica nada en el servidor**.
+Repositorio de automatización, configuración y verificación del **laboratorio antiguo** de seguridad y observabilidad. Es independiente de `infrastructure-platform` y sigue siendo la referencia operativa del entorno existente.
 
-## Archivos incluidos
+> **Estado:** laboratorio funcional con componentes instalados, auditorías y pilotos. **No** existe todavía un workflow único verificado que reconstruya toda la plataforma desde cero.
 
-- `monitorizacion/playbooks/instalar_grafana.yml`: preflight estricto: `inspect` de solo lectura; `install` exclusivamente para instalaciones limpias. En ambos modos el control se ejecuta **antes** de las tareas con escrituras. Conserva el resto del instalador original.
-- `monitorizacion/templates/grafana/docker-compose.yml.j2`: soporte SMTP opcional en instalaciones nuevas, con referencias a `.env` privado (sin valores de contraseñas en Git).
-- `monitorizacion/examples/variables_grafana.yml`: modos documentados.
-- `monitorizacion/PROTECCION_GRAFANA_JOB05.md`: procedimiento, límites y validación.
-- `tests/test_grafana_job05_guard.py`: regresión estática + render Jinja/YAML.
+## Componentes y responsabilidades
 
-## Aplicación al repositorio `deployment-kits`
+| Área | Componentes | Función |
+| --- | --- | --- |
+| Automatización | Ansible / AWX sobre K3s | Despliegue de servicios, agentes, configuraciones, auditorías y tareas de mantenimiento. |
+| Seguridad | Wazuh Manager, Indexer, Dashboard y agentes | Recopilación, análisis e indexación de eventos de seguridad. |
+| Respuesta activa | Wazuh Active Response, Python, iptables y systemd | **Piloto SSH** validado en el agente `005`; no protege automáticamente a todos los equipos. |
+| Métricas | Prometheus, Node Exporter, cAdvisor, kube-state-metrics | Recopilación de métricas de servidores, contenedores y K3s. |
+| Logs | Loki, Grafana Alloy | Recopilación y consulta de logs, según colector y origen configurados. |
+| Visualización y alertas | Grafana | Datasources, dashboards, reglas y canales de alerting. |
+| Proxy y correlación | Traefik y puente Traefik–Loki–Wazuh | Exposición/routing y tratamiento de eventos del proxy para seguridad. |
+| GeoIP | Pipeline Wazuh/OpenSearch y panel GeoIP | Enriquecimiento y visualización geográfica de IPs. |
+| Bot de alerting | `security-triage-bot` (**repositorio/servicio separado**) | FastAPI, Smart Triage, Gemini, SQLite, enriquecimiento y notificadores Telegram/SMTP. En este repositorio hay **integraciones**, pero no su instalador completo. |
 
-1. Antes de sustituir, revisar `git diff` contra los archivos actuales. Esta entrega se elaboró contra `deployment-kits.zip` facilitado anteriormente. Si Job 05 cambió desde entonces, **fusionar las modificaciones en vez de sobrescribirlas**.
-2. Copiar los archivos respetando rutas. No añadir `.env`, secretos, backups, `.git`, ni `__pycache__` al commit.
-3. Ejecutar `python -m unittest discover -s tests -p test_grafana_job05_guard.py -v` (requiere PyYAML y Jinja2) y `git diff --check`.
-4. Commit / push / sincronizar **el proyecto AWX**.
-5. **En el Grafana operativo**, ejecutar Job 05 **solo** con `var_grafana_job05_mode: inspect`. Debe terminar tras reportar Compose, DB, `.env` y SMTP; no reiniciar servicios.
+## Organización de este repositorio
 
-## Comportamiento / limitaciones
+```text
+deployment-kits/
+├── collections/                 # Requisitos de colecciones Ansible
+├── monitorizacion/
+│   ├── playbooks/              # Entradas de ejecución en AWX
+│   ├── roles/                  # Roles de seguridad e integración
+│   ├── templates/              # Plantillas de servicios
+│   ├── files/                  # Herramientas transferidas por Ansible
+│   ├── tasks/                  # Tareas reutilizables de Grafana
+│   ├── integrations/           # Puente Traefik–Wazuh
+│   ├── manifests/              # Manifiestos para K3s
+│   ├── dashboards/             # Dashboards versionados
+│   ├── examples/               # Variables de ejemplo SIN secretos
+│   └── docs/                   # Guías técnicas específicas
+├── tests/                       # Pruebas del código y contratos
+└── tools/                       # Herramientas locales de verificación
+```
 
-- `var_grafana_job05_mode: inspect`: lectura, `meta: end_play`, ninguna escritura; no se comprueban credenciales SMTP ni se muestra contenido.
-- `var_grafana_job05_mode: install` (por defecto): falla **antes de cambios** si existe `docker-compose.yml` o `data/grafana.db`. Esto modifica deliberadamente la semántica de reejecución del instalador legado. El objetivo es protección prioritaria; no proporciona adopción ni actualización de un Grafana existente.
-- Solo para nueva VM, `var_grafana_smtp_enabled: true` habilita valores `${GRAFANA_SMTP_*}` (host, usuario, contraseña y remitente), siempre cargados desde `${var_grafana_install_dir}/.env`. Nunca enviar las credenciales por Extra Variables, Git o logs.
-- Este parche no migra la instalación antigua al estado plenamente declarativo, no cambia Grafana existente y no cubre restauración. Una futura gestión de un Grafana existente necesita un bloque de adopción separado, con copia validada y aprobación explícita.
-- No ejecutar Job 05 en modo `install` sobre el servidor que ya contiene 10 reglas y SMTP funcional. No ejecutar un flujo AWX que fuerce ese modo hasta revisar el workflow.
+## Workflows y playbooks existentes
+
+La automatización inicial incluía:
+
+1. **Despliegue instalación (01–05):** `instalar_docker.yml` → `instalar_wazuh.yml` → `configurar_wazuh.yml` → `instalar_prometheus.yml` → `instalar_grafana.yml`.
+2. **Despliegue Agentes (06–07):** `instalar_agentes_monitorizacion.yml` → `configurar_agentes_prometheus.yml`.
+
+Los archivos se encuentran en `monitorizacion/playbooks/`. Hay también playbooks independientes de observabilidad K3s, Alloy Host, dashboards, GeoIP, alertas de Grafana, backups/restauración, auditorías, Traefik y Active Response.
+
+**Precaución:** estos workflows heredados **no** constituyen todavía una reconstrucción integral validada. `instalar_observabilidad_k3s.yml` prepara accesos Kubernetes que utiliza el Prometheus antiguo; esta dependencia debe revisarse en el orden de instalación.
+
+## Modos de operación y seguridad
+
+- **Instalación limpia:** ejecutar únicamente en hosts nuevos y después de validar variables, rutas, puertos y recursos.
+- **Inspección / auditoría:** utilizar los modos de solo lectura de los playbooks protegidos, especialmente los de Grafana y Prometheus, sobre instalaciones existentes.
+- **Adopción:** procedimiento distinto de instalación; seguir las guías y las comprobaciones previas.
+- **Backups y restauración:** conservar los scripts/verificadores y ejecutar ensayos controlados antes de cualquier restauración real.
+- **Active Response:** piloto sujeto a aprobación y pruebas; no habilitar bloqueos indiscriminados.
+- **Credenciales:** usar AWX y ficheros privados según el contrato de cada componente; **nunca** guardar contraseñas, tokens, certificados privados, volúmenes o bases de datos reales en Git.
+
+Nunca ejecutar `docker compose down -v` en una instalación con datos que deban conservarse. Un `git pull` o una sincronización de AWX **no** autorizan por sí solos un despliegue ni una actualización.
+
+## Documentación de entrada
+
+- [Instalación básica y configuración de AWX](monitorizacion/README_DESPLIEGUE_AWX.md)
+- [Agentes y targets de Prometheus](monitorizacion/AGENTES.md)
+- [Auditoría y gestión de Grafana Alerting](monitorizacion/ALERTING_GRAFANA_AWX.md)
+- [Protección del instalador de Grafana](monitorizacion/PROTECCION_GRAFANA_JOB05.md)
+- [Protección del instalador de Prometheus](monitorizacion/PROTECCION_PROMETHEUS_JOB04.md)
+- [Copias de Grafana](monitorizacion/BACKUP_GRAFANA_AWX.md)
+- [Restauración de Grafana](monitorizacion/RESTAURACION_GRAFANA_AWX.md)
+- [Wazuh Active Response](monitorizacion/docs/WAZUH_ACTIVE_RESPONSE.md)
+- [GeoIP de Wazuh](monitorizacion/GEOIP_WAZUH_AWX.md)
+- [Traefik, Loki y Wazuh](monitorizacion/docs/TRAEFIK_LOKI_WAZUH.md)
+- [Integración de métricas del bot](monitorizacion/TRIAGE_METRICS_AWX.md)
+
+## Pendiente para el workflow maestro
+
+- Auditar preflight, inventarios, credenciales y dependencias antes de construir el workflow.
+- Separar las rutas **instalación limpia**, **inspección/adopción**, **mantenimiento** y **recuperación**; nunca encadenarlas indiscriminadamente.
+- Incorporar la instalación automatizada del bot desde su repositorio propio, creación/configuración inicial de GeoIP, alerting y verificaciones end-to-end cuando se implementen.
+- Validar idempotencia, retención de datos, fuentes de logs, consultas de datasources, paneles, targets, notificación y recuperación.
+
+**Regla de mantenimiento:** conservar aquí solo código reutilizable, pruebas y documentación vigente. Los artefactos de un solo uso, instrucciones de parches ya aplicados, cachés, secretos y datos locales deben quedar fuera del repositorio.
