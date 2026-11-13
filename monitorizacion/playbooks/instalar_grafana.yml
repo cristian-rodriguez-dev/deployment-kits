@@ -43,7 +43,7 @@
     - name: Validar modo seguro del Job 05
       ansible.builtin.assert:
         that:
-          - (var_grafana_job05_mode | default('install')) in ['inspect', 'install']
+          - (var_grafana_job05_mode | default('inspect')) in ['inspect', 'install']
         fail_msg: "Usa var_grafana_job05_mode: inspect o install."
 
     - name: Detectar Compose ya existente
