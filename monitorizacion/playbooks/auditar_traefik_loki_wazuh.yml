@@ -6,6 +6,6 @@
   tasks:
     - name: Auditar integración sin modificar servicios
       ansible.builtin.include_role:
-        name: traefik_loki_wazuh
+        name: "{{ playbook_dir }}/../roles/traefik_loki_wazuh"
       vars:
         var_tlw_mode: audit

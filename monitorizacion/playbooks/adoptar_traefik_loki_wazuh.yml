@@ -7,6 +7,6 @@
   tasks:
     - name: Adoptar servicios ya instalados únicamente con permiso explícito
       ansible.builtin.include_role:
-        name: traefik_loki_wazuh
+        name: "{{ playbook_dir }}/../roles/traefik_loki_wazuh"
       vars:
         var_tlw_mode: adopt
