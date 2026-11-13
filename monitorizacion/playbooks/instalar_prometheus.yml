@@ -5,6 +5,97 @@
   gather_facts: true
 
   pre_tasks:
+    # Seguridad del Job 04: inspeccion sin cambios por defecto.
+    # Las comprobaciones se ejecutan antes de apt, templates, Docker y handlers.
+    - name: Validar modo seguro del Job 04 y ruta objetivo
+      ansible.builtin.assert:
+        that:
+          - (var_prometheus_job04_mode | default('inspect')) in ['inspect', 'install']
+          - var_prometheus_install_dir is defined
+          - (var_prometheus_install_dir | default('')) is match('^/')
+          - (var_prometheus_install_dir | default('')) != '/'
+        fail_msg: >-
+          Indica var_prometheus_job04_mode: inspect o install y
+          una ruta absoluta no raiz en var_prometheus_install_dir.
+
+    - name: Detectar directorio de instalacion de Prometheus
+      ansible.builtin.stat:
+        path: "{{ var_prometheus_install_dir }}"
+      register: var_prometheus_existing_dir
+
+    - name: Detectar Compose existente de Prometheus
+      ansible.builtin.stat:
+        path: "{{ var_prometheus_install_dir }}/docker-compose.yml"
+      register: var_prometheus_existing_compose
+
+    - name: Detectar configuracion existente de Prometheus
+      ansible.builtin.stat:
+        path: "{{ var_prometheus_install_dir }}/prometheus/prometheus.yml"
+      register: var_prometheus_existing_config
+
+    - name: Detectar almacenamiento persistente de Prometheus
+      ansible.builtin.stat:
+        path: "{{ var_prometheus_install_dir }}/data"
+      register: var_prometheus_existing_data
+
+    - name: Mostrar inspeccion protegida de Prometheus
+      ansible.builtin.debug:
+        msg:
+          - "Modo: INSPECT; solo lectura; no se instalara ni reiniciara Prometheus"
+          - "Directorio existente: {{ var_prometheus_existing_dir.stat.exists }}"
+          - "Compose existente: {{ var_prometheus_existing_compose.stat.exists }}"
+          - "Configuracion existente: {{ var_prometheus_existing_config.stat.exists }}"
+          - "Almacenamiento existente: {{ var_prometheus_existing_data.stat.exists }}"
+          - "Sin alteraciones de targets, TSDB, contenedores ni credenciales"
+      when: (var_prometheus_job04_mode | default('inspect')) == 'inspect'
+
+    - name: Finalizar la inspeccion antes de cualquier operacion de despliegue
+      ansible.builtin.meta: end_play
+      when: (var_prometheus_job04_mode | default('inspect')) == 'inspect'
+
+    - name: Bloquear instalacion sobre cualquier directorio existente
+      ansible.builtin.assert:
+        that:
+          - not var_prometheus_existing_dir.stat.exists
+          - not var_prometheus_existing_compose.stat.exists
+          - not var_prometheus_existing_config.stat.exists
+          - not var_prometheus_existing_data.stat.exists
+        fail_msg: >-
+          El Job 04 solo instala sobre una ruta nueva no existente.
+          Se detecto una huella de instalacion previa; no se cambiara Prometheus.
+          Usa inspect. Para adopcion o actualizacion preparar otro proceso.
+      when: (var_prometheus_job04_mode | default('inspect')) == 'install'
+
+    - name: Exigir confirmacion explicita para instalacion limpia
+      ansible.builtin.assert:
+        that:
+          - (var_prometheus_job04_confirm | default('')) == 'INSTALL_NEW_PROMETHEUS'
+        fail_msg: >-
+          Para una instalacion nueva autorizada indica
+          var_prometheus_job04_confirm: INSTALL_NEW_PROMETHEUS.
+      when: (var_prometheus_job04_mode | default('inspect')) == 'install'
+
+    - name: Validar que el proyecto Docker Compose no esta desplegado
+      ansible.builtin.command:
+        argv:
+          - docker
+          - ps
+          - -aq
+          - --filter
+          - "label=com.docker.compose.project={{ var_prometheus_project_name }}"
+      register: var_prometheus_existing_project_containers
+      changed_when: false
+      when: (var_prometheus_job04_mode | default('inspect')) == 'install'
+
+    - name: Bloquear proyecto Compose existente antes de desplegar
+      ansible.builtin.assert:
+        that:
+          - (var_prometheus_existing_project_containers.stdout | trim) == ''
+        fail_msg: >-
+          Ya existen contenedores del proyecto Compose de Prometheus.
+          No se creara otro despliegue ni se recrearan servicios existentes.
+      when: (var_prometheus_job04_mode | default('inspect')) == 'install'
+
     - name: Comprobar las variables necesarias
       ansible.builtin.assert:
         that:
