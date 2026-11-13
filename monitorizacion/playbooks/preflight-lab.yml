@@ -1,0 +1,248 @@
+---
+# PREFLIGHT-00 — deployment-kits (laboratorio antiguo)
+# Solo lectura. No instalar, adoptar, corregir, reiniciar ni escribir configuraciones.
+# Modo predeterminado: audit. new_install SOLO comprueba preparación de VMs nuevas.
+
+- name: PREFLIGHT 00A | Validar el contrato del inventario AWX
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    preflight_mode: "{{ var_preflight_mode | default('audit') }}"
+    preflight_required_groups:
+      - docker_servers
+      - wazuh-servers
+      - prometheus-servers
+      - grafana-servers
+      - monitoring-agents
+  tasks:
+    - name: Aceptar únicamente modos de comprobación
+      ansible.builtin.assert:
+        that:
+          - preflight_mode in ['audit', 'new_install']
+        fail_msg: 'var_preflight_mode debe ser audit o new_install.'
+
+    - name: Exigir los cinco grupos usados por los instaladores
+      ansible.builtin.assert:
+        that:
+          - (groups.get(item, []) | length) > 0
+        fail_msg: "Falta el grupo {{ item }} o no contiene hosts. Revisar el inventario AWX."
+      loop: "{{ preflight_required_groups }}"
+
+    - name: Evitar incluir clientes en los grupos de servidores centrales
+      ansible.builtin.assert:
+        that:
+          - >-
+            (groups.get('monitoring-agents', []) | intersect(
+              groups.get('wazuh-servers', [])
+              + groups.get('prometheus-servers', [])
+              + groups.get('grafana-servers', []))) | length == 0
+        fail_msg: 'Los equipos monitoring-agents no pueden ser servidores centrales.'
+
+    - name: Exigir autorización explícita para comprobar una instalación nueva
+      ansible.builtin.assert:
+        that:
+          - (var_preflight_confirm | default('')) == 'CHECK_NEW_EMPTY_LAB'
+        fail_msg: >-
+          Para comprobar una instalación NUEVA, indicar
+          var_preflight_confirm: CHECK_NEW_EMPTY_LAB.
+          Este job sigue siendo de solo lectura.
+      when: preflight_mode == 'new_install'
+
+    - name: Verificar cobertura del grupo de instalación Docker
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((groups.get('wazuh-servers', [])
+              + groups.get('prometheus-servers', [])
+              + groups.get('grafana-servers', []))
+             | unique | difference(groups.get('docker_servers', [])) | length) == 0
+        fail_msg: >-
+          En una instalación nueva, todos los servidores centrales que usarán
+          contenedores deben pertenecer a docker_servers.
+      when: preflight_mode == 'new_install'
+
+    - name: Mostrar resumen no sensible del inventario
+      ansible.builtin.debug:
+        msg:
+          - "Modo de comprobación: {{ preflight_mode }}"
+          - "Servidores Docker: {{ groups.get('docker_servers', []) | length }}"
+          - "Servidores Wazuh: {{ groups.get('wazuh-servers', []) | length }}"
+          - "Servidores Prometheus: {{ groups.get('prometheus-servers', []) | length }}"
+          - "Servidores Grafana: {{ groups.get('grafana-servers', []) | length }}"
+          - "Agentes remotos: {{ groups.get('monitoring-agents', []) | length }}"
+          - 'No se ha modificado ningún host.'
+
+- name: PREFLIGHT 00B | Comprobar hosts y huellas de instalación (solo lectura)
+  hosts: docker_servers:wazuh-servers:prometheus-servers:grafana-servers:monitoring-agents
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  vars:
+    preflight_mode: "{{ var_preflight_mode | default('audit') }}"
+    preflight_service_paths:
+      - name: wazuh
+        group: wazuh-servers
+        path: "{{ var_wazuh_install_dir | default('') }}"
+      - name: prometheus
+        group: prometheus-servers
+        path: "{{ var_prometheus_install_dir | default('') }}"
+      - name: grafana
+        group: grafana-servers
+        path: "{{ var_grafana_install_dir | default('') }}"
+  tasks:
+    - name: Validar sistema operativo Ubuntu
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+        fail_msg: 'Los instaladores de este repositorio están diseñados para Ubuntu.'
+
+    - name: Confirmar capacidad de elevación sin efectuar cambios
+      ansible.builtin.command:
+        argv: [id, -u]
+      register: preflight_effective_uid
+      changed_when: false
+
+    - name: Exigir privilegios root para futuros instaladores
+      ansible.builtin.assert:
+        that:
+          - preflight_effective_uid.stdout == '0'
+        fail_msg: 'La credencial de AWX no permite become root en este host.'
+
+    - name: Obtener estados de servicios sin modificarlos
+      ansible.builtin.service_facts:
+
+    - name: Mostrar información general no sensible del host
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Ubuntu: {{ ansible_facts['distribution_version'] }}"
+          - "Arquitectura: {{ ansible_facts['architecture'] }}"
+          - "RAM (MB): {{ ansible_facts['memtotal_mb'] | default('no disponible') }}"
+          - "CPU vCPUs: {{ ansible_facts['processor_vcpus'] | default('no disponible') }}"
+          - >-
+            Docker: {{ ansible_facts.services.get('docker.service', {}).get('state', 'no detectado') }}
+          - >-
+            K3s: {{ ansible_facts.services.get('k3s.service', {}).get('state', 'no detectado') }}
+
+    - name: Validar las rutas declaradas para instalaciones nuevas
+      ansible.builtin.assert:
+        that:
+          - (item.path | length) > 0
+          - item.path is match('^/')
+          - item.path != '/'
+          - "'..' not in item.path.split('/')"
+        fail_msg: >-
+          {{ item.name }} necesita una ruta absoluta segura para una instalación nueva.
+          Revisar la variable correspondiente en el inventario AWX.
+      loop: "{{ preflight_service_paths }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - preflight_mode == 'new_install'
+        - inventory_hostname in groups.get(item.group, [])
+
+    - name: Inspeccionar rutas de servicios sin crear directorios
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+        follow: false
+      loop: "{{ preflight_service_paths }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - inventory_hostname in groups.get(item.group, [])
+        - (item.path | length) > 0
+      register: preflight_install_paths
+
+    - name: Informar de huellas sin revelar credenciales ni contenido
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.name }}: ruta declarada {{ item.item.path }};
+          existe={{ item.stat.exists | default('desconocido') }};
+          symlink={{ item.stat.islnk | default(false) }}.
+      loop: "{{ preflight_install_paths.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: not (item.skipped | default(false))
+
+    - name: Impedir instalación nueva sobre rutas Wazuh y Prometheus existentes
+      ansible.builtin.assert:
+        that:
+          - not (item.stat.exists | default(false))
+        fail_msg: >-
+          Ya existe la ruta de {{ item.item.name }} en {{ inventory_hostname }}.
+          No autorizar instalación limpia ni borrar datos: usar auditoría/adopción.
+      loop: "{{ preflight_install_paths.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when:
+        - preflight_mode == 'new_install'
+        - item.item.name in ['wazuh', 'prometheus']
+        - not (item.skipped | default(false))
+
+    - name: Inspeccionar existencia de la raíz de Grafana (SMTP puede requerir .env previo)
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir | default('/ruta-invalida-no-configurada') }}"
+        follow: false
+      register: preflight_grafana_root
+      when:
+        - preflight_mode == 'new_install'
+        - inventory_hostname in groups.get('grafana-servers', [])
+
+    - name: Rechazar enlaces simbólicos o archivos como raíz de Grafana
+      ansible.builtin.assert:
+        that:
+          - not (preflight_grafana_root.stat.islnk | default(false))
+          - >-
+            not (preflight_grafana_root.stat.exists | default(false))
+            or (preflight_grafana_root.stat.isdir | default(false))
+        fail_msg: 'La raíz de Grafana debe ser inexistente o un directorio real.'
+      when:
+        - preflight_mode == 'new_install'
+        - inventory_hostname in groups.get('grafana-servers', [])
+
+    - name: Inspeccionar contenido inmediato de una raíz de Grafana preexistente
+      ansible.builtin.find:
+        paths: "{{ var_grafana_install_dir }}"
+        recurse: false
+        hidden: true
+        file_type: any
+        follow: false
+      register: preflight_grafana_entries
+      when:
+        - preflight_mode == 'new_install'
+        - inventory_hostname in groups.get('grafana-servers', [])
+        - preflight_grafana_root.stat.isdir | default(false)
+
+    - name: Permitir únicamente .env en la raíz preprovisionada de Grafana
+      ansible.builtin.assert:
+        that:
+          - >-
+            (preflight_grafana_entries.files | default([])
+             | map(attribute='path') | map('basename')
+             | difference(['.env']) | length) == 0
+        fail_msg: >-
+          La raíz Grafana contiene más elementos que .env.
+          No es una instalación limpia; no borrar ni sobreescribir.
+      when:
+        - preflight_mode == 'new_install'
+        - inventory_hostname in groups.get('grafana-servers', [])
+        - preflight_grafana_root.stat.isdir | default(false)
+
+    - name: Exigir K3s activo antes de desplegar observabilidad K3s
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services.get('k3s.service', {}).get('state', '') == 'running'
+        fail_msg: >-
+          La rama instalar_observabilidad_k3s.yml requiere K3s activo
+          en prometheus-servers. Verificar bootstrap antes del workflow.
+      when:
+        - preflight_mode == 'new_install'
+        - inventory_hostname in groups.get('prometheus-servers', [])
+
+    - name: Marcar alcance de la validación
+      ansible.builtin.debug:
+        msg: >-
+          PREFLIGHT 00B completado en {{ inventory_hostname }} en modo {{ preflight_mode }}.
+          Solo lectura: NO se han comprobado aún DNS, puertos libres,
+          capacidad mínima, secretos ni proyectos Docker Compose preexistentes.
