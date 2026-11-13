@@ -102,5 +102,107 @@ class Job05Tests(unittest.TestCase):
         self.assertNotIn('docker system prune', text)
         self.assertNotIn('pull: always', text)
 
+    # Nuevas pruebas para el cierre seguro del Job 05 (sin AWX ni Docker).
+    def test_11_default_mode_never_installs(self):
+        from jinja2 import Environment
+        env = Environment()
+        mode = env.compile_expression("var_grafana_job05_mode | default('inspect')")
+        self.assertEqual(mode(), 'inspect')
+        names = [task['name'] for task in self.pre]
+        end_idx = names.index('Terminar inspeccion sin ejecutar tareas de despliegue')
+        self.assertEqual(self.pre[end_idx]['ansible.builtin.meta'], 'end_play')
+        self.assertEqual(self.pre[end_idx]['when'],
+                         "(var_grafana_job05_mode | default('inspect')) == 'inspect'")
+        for task in self.pre[:end_idx + 1]:
+            self.assertTrue(set(task).intersection({'ansible.builtin.assert',
+                'ansible.builtin.stat', 'ansible.builtin.slurp',
+                'ansible.builtin.debug', 'ansible.builtin.meta'}), task['name'])
+            self.assertNotIn("default('install')", str(task))
+        self.assertNotIn("default('install')", PLAYBOOK.read_text(encoding='utf8'))
+
+    def test_12_explicit_confirmation_and_project_collision(self):
+        from jinja2 import Environment
+        names = [t['name'] for t in self.pre]
+        approval = self.pre[names.index('Exigir confirmacion explicita para instalar Grafana nuevo')]
+        expr = Environment().compile_expression(approval['ansible.builtin.assert']['that'][0])
+        self.assertFalse(expr())
+        self.assertFalse(expr(var_grafana_job05_confirm='INVALID'))
+        self.assertTrue(expr(var_grafana_job05_confirm='INSTALL_NEW_GRAFANA'))
+        self.assertEqual(approval['when'],
+                         "(var_grafana_job05_mode | default('inspect')) == 'install'")
+        cmd = self.pre[names.index('Detectar contenedores del proyecto Compose de Grafana')]
+        self.assertEqual(cmd['ansible.builtin.command']['argv'][:4],
+                         ['docker', 'ps', '-aq', '--filter'])
+        self.assertFalse(cmd.get('changed_when', True))
+        collision = self.pre[names.index('Bloquear un proyecto Compose de Grafana preexistente')]
+        self.assertIn("== ''", collision['ansible.builtin.assert']['that'][0])
+        self.assertLess(names.index('Bloquear un proyecto Compose de Grafana preexistente'),
+                        names.index('Comprobar si AWX ya preparó esta instalación'))
+
+    def test_13_install_guard_matrix(self):
+        from jinja2 import Environment
+        from pathlib import PurePosixPath
+        env = Environment()
+        env.filters['basename'] = lambda value: PurePosixPath(value).name
+        env.filters['bool'] = bool
+        names = [t['name'] for t in self.pre]
+        guard = self.pre[names.index('Bloquear sobreescritura de instalaciones operativas')]
+        expr = env.compile_expression(guard['ansible.builtin.assert']['that'][0])
+
+        def allowed(existing, entries=(), smtp=False, isdir=True,
+                    islnk=False):
+            kw = {
+                'var_grafana_existing_dir': {'stat': {'exists': existing,
+                                         'isdir': isdir, 'islnk': islnk}},
+                'var_grafana_existing_entries': {'files': [
+                    {'path': '/srv/grafana/' + v} for v in entries]},
+                'var_grafana_smtp_enabled': smtp,
+            }
+            return bool(expr(**kw))
+
+        self.assertTrue(allowed(False))
+        self.assertTrue(allowed(True, []))
+        self.assertTrue(allowed(True, ['.env'], smtp=True))
+        self.assertFalse(allowed(True, ['.env'], smtp=False))
+        self.assertFalse(allowed(True, ['data']))
+        self.assertFalse(allowed(True, ['.env', 'other'], smtp=True))
+        self.assertFalse(allowed(True, [], isdir=False))
+        self.assertFalse(allowed(True, [], islnk=True))
+
+        full_text = ' '.join(guard['ansible.builtin.assert']['that'])
+        for field in ['var_grafana_existing_compose', 'var_grafana_existing_data',
+                      'var_grafana_existing_database', 'var_grafana_existing_provisioning',
+                      'var_grafana_existing_secrets', 'var_grafana_existing_state']:
+            self.assertIn('not ' + field + '.stat.exists', full_text)
+        finder = self.pre[names.index('Inventariar contenido previo del directorio objetivo')]
+        self.assertTrue(finder['ansible.builtin.find']['hidden'])
+        self.assertEqual(finder['ansible.builtin.find']['file_type'], 'any')
+
+    def test_14_smtp_preprovision_is_private_and_no_symlink(self):
+        names = [t['name'] for t in self.pre]
+        task = self.pre[names.index('Exigir .env protegido para instalacion limpia con SMTP')]
+        statements = ' '.join(task['ansible.builtin.assert']['that'])
+        self.assertIn('isreg', statements)
+        self.assertIn('islnk', statements)
+        self.assertIn('uid', statements)
+        self.assertIn("'0600'", statements)
+        self.assertTrue(self.pre[names.index('Comprobar claves SMTP sin revelar sus valores')]['no_log'])
+        self.assertTrue(self.pre[names.index('Rechazar credenciales SMTP ausentes o vacias')]['no_log'])
+
+    def test_15_guard_precedes_mutating_tasks_and_checks_installer_vars_late(self):
+        names = [task['name'] for task in self.pre]
+        self.assertEqual(self.pre[0]['name'], 'Validar modo seguro del Job 05 y ruta objetivo')
+        self.assertLess(names.index('Terminar inspeccion sin ejecutar tareas de despliegue'),
+                        names.index('Comprobar que AWX proporciona las variables de instalacion'))
+        self.assertLess(names.index('Bloquear sobreescritura de instalaciones operativas'),
+                        names.index('Comprobar que AWX proporciona las variables de instalacion'))
+        self.assertLess(names.index('Bloquear un proyecto Compose de Grafana preexistente'),
+                        len(names))
+        self.assertEqual(self.tasks[0]['name'], 'Instalar dependencia de los módulos Docker')
+        self.assertTrue(all('ansible.builtin.apt' not in t and
+                            'community.docker.docker_compose_v2' not in t and
+                            'ansible.builtin.template' not in t and
+                            'ansible.builtin.copy' not in t for t in self.pre))
+
 if __name__ == '__main__':
     unittest.main()

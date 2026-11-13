@@ -22,43 +22,68 @@
       }}
 
   pre_tasks:
-    - name: Comprobar que AWX proporciona las variables necesarias
-      ansible.builtin.assert:
-        that:
-          - var_grafana_install_dir is defined
-          - var_grafana_access_group is defined
-          - var_grafana_project_name is defined
-          - var_grafana_image is defined
-          - var_grafana_port is defined
-          - var_grafana_admin_user is defined
-          - var_grafana_admin_email is defined
-          - var_monitorizacion_network is defined
-          - var_grafana_prometheus_url is defined
-        fail_msg: >-
-          Faltan variables de Grafana.
-          Configúralas en el grupo grafana-servers del inventario de AWX.
-
-    # La protección se evalúa antes de apt, archivos, redes, plantilla y Compose.
-    # La instalación existente NO se gestiona ni adopta desde este instalador.
-    - name: Validar modo seguro del Job 05
+    # Contrato Job 05: INSPECT por defecto; INSTALL exige opt-in explicito.
+    # Ninguna tarea de escritura puede preceder al guard de instalacion.
+    - name: Validar modo seguro del Job 05 y ruta objetivo
       ansible.builtin.assert:
         that:
           - (var_grafana_job05_mode | default('inspect')) in ['inspect', 'install']
-        fail_msg: "Usa var_grafana_job05_mode: inspect o install."
+          - var_grafana_install_dir is defined
+          - (var_grafana_install_dir | default('')) is string
+          - (var_grafana_install_dir | default('')) is match('^/.+')
+          - (var_grafana_install_dir | default('')) != '/'
+          - "'/../' not in (var_grafana_install_dir | default(''))"
+          - "not (var_grafana_install_dir | default('')).endswith('/..')"
+        fail_msg: >-
+          Job 05: usa inspect o install y una ruta absoluta no raiz
+          sin recorridos al directorio padre.
+
+    - name: Detectar directorio objetivo de Grafana
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir }}"
+        follow: false
+      register: var_grafana_existing_dir
 
     - name: Detectar Compose ya existente
       ansible.builtin.stat:
         path: "{{ var_grafana_install_dir }}/docker-compose.yml"
+        follow: false
       register: var_grafana_existing_compose
+
+    - name: Detectar almacenamiento de Grafana
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir }}/data"
+        follow: false
+      register: var_grafana_existing_data
 
     - name: Detectar base de datos existente
       ansible.builtin.stat:
         path: "{{ var_grafana_install_dir }}/data/grafana.db"
+        follow: false
       register: var_grafana_existing_database
+
+    - name: Detectar provisioning existente
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir }}/provisioning"
+        follow: false
+      register: var_grafana_existing_provisioning
+
+    - name: Detectar secretos existentes de Grafana
+      ansible.builtin.stat:
+        path: "{{ var_grafana_install_dir }}/secrets"
+        follow: false
+      register: var_grafana_existing_secrets
+
+    - name: Detectar estado previo de AWX
+      ansible.builtin.stat:
+        path: "{{ var_grafana_state_file }}"
+        follow: false
+      register: var_grafana_existing_state
 
     - name: Detectar archivo de variables privado
       ansible.builtin.stat:
         path: "{{ var_grafana_install_dir }}/.env"
+        follow: false
       register: var_grafana_existing_env
 
     - name: Inspeccionar presencia declarada de SMTP sin exponer configuracion
@@ -66,48 +91,122 @@
         src: "{{ var_grafana_install_dir }}/docker-compose.yml"
       register: var_grafana_existing_compose_bytes
       when:
-        - (var_grafana_job05_mode | default('install')) == 'inspect'
-        - var_grafana_existing_compose.stat.exists
+        - (var_grafana_job05_mode | default('inspect')) == 'inspect'
+        - var_grafana_existing_compose.stat.isreg | default(false)
       no_log: true
 
     - name: Informar del estado protegido sin modificaciones
       ansible.builtin.debug:
         msg:
           - "Modo: INSPECT; solo lectura; no se instalara ni reiniciara Grafana"
+          - "Directorio existente: {{ var_grafana_existing_dir.stat.exists }}"
           - "Compose existente: {{ var_grafana_existing_compose.stat.exists }}"
+          - "Almacenamiento existente: {{ var_grafana_existing_data.stat.exists }}"
           - "Base de datos existente: {{ var_grafana_existing_database.stat.exists }}"
+          - "Provisioning existente: {{ var_grafana_existing_provisioning.stat.exists }}"
+          - "Secretos existentes: {{ var_grafana_existing_secrets.stat.exists }}"
+          - "Marca AWX existente: {{ var_grafana_existing_state.stat.exists }}"
           - "Archivo .env existente: {{ var_grafana_existing_env.stat.exists }}"
           - >-
             SMTP declarado en Compose:
             {{ 'GF_SMTP_ENABLED' in
                (var_grafana_existing_compose_bytes.content | default('') | b64decode) }}
           - "Sin alteraciones de volumenes, alertas, secretos ni contenedores"
-      when: (var_grafana_job05_mode | default('install')) == 'inspect'
+      when: (var_grafana_job05_mode | default('inspect')) == 'inspect'
 
     - name: Terminar inspeccion sin ejecutar tareas de despliegue
       ansible.builtin.meta: end_play
-      when: (var_grafana_job05_mode | default('install')) == 'inspect'
+      when: (var_grafana_job05_mode | default('inspect')) == 'inspect'
+
+    - name: Exigir confirmacion explicita para instalar Grafana nuevo
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_job05_confirm | default('')) == 'INSTALL_NEW_GRAFANA'
+        fail_msg: >-
+          Instalacion no autorizada. Para una VM nueva indica
+          var_grafana_job05_mode: install y
+          var_grafana_job05_confirm: INSTALL_NEW_GRAFANA.
+      when: (var_grafana_job05_mode | default('inspect')) == 'install'
+
+    - name: Validar tipo de flag SMTP para la instalacion nueva
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_smtp_enabled | default(false)) is boolean
+        fail_msg: var_grafana_smtp_enabled debe ser booleano (true/false).
+      when: (var_grafana_job05_mode | default('inspect')) == 'install'
+
+    # Se permite solo una carpeta nueva inexistente o una carpeta cuyo
+    # unico elemento es .env, preprovisionado para SMTP. Nada mas.
+    - name: Inventariar contenido previo del directorio objetivo
+      ansible.builtin.find:
+        paths: "{{ var_grafana_install_dir }}"
+        recurse: false
+        hidden: true
+        file_type: any
+      register: var_grafana_existing_entries
+      changed_when: false
+      when:
+        - (var_grafana_job05_mode | default('inspect')) == 'install'
+        - var_grafana_existing_dir.stat.isdir | default(false)
+        - not (var_grafana_existing_dir.stat.islnk | default(false))
 
     - name: Bloquear sobreescritura de instalaciones operativas
       ansible.builtin.assert:
         that:
+          - >-
+            not var_grafana_existing_dir.stat.exists
+            or (
+              (var_grafana_existing_dir.stat.isdir | default(false))
+              and not (var_grafana_existing_dir.stat.islnk | default(false))
+              and (
+                var_grafana_existing_entries.files | default([])
+                | map(attribute='path') | map('basename') | list | sort
+              ) == (
+                ['.env'] if (var_grafana_smtp_enabled | default(false) | bool) else []
+              )
+            )
           - not var_grafana_existing_compose.stat.exists
+          - not var_grafana_existing_data.stat.exists
           - not var_grafana_existing_database.stat.exists
+          - not var_grafana_existing_provisioning.stat.exists
+          - not var_grafana_existing_secrets.stat.exists
+          - not var_grafana_existing_state.stat.exists
         fail_msg: >-
-          Job 05 en modo INSTALL permite solo instalaciones limpias.
-          Ya hay un Compose o una base de datos en la ruta objetivo.
-          Para no perder SMTP ni configuraciones locales, no se hara ningun cambio.
-          Ejecuta modo inspect o prepara un procedimiento separado de adopcion.
+          Job 05 INSTALL bloqueado: la ruta contiene una instalacion o
+          ficheros anteriores. Solo se acepta un directorio nuevo vacio,
+          o un directorio que contenga exclusivamente el .env privado de SMTP.
+          No se modificara Grafana; utiliza inspect o una adopcion separada.
+      when: (var_grafana_job05_mode | default('inspect')) == 'install'
+
+    - name: Comprobar que AWX proporciona las variables de instalacion
+      ansible.builtin.assert:
+        that:
+          - var_grafana_access_group is defined
+          - var_grafana_project_name is defined
+          - (var_grafana_project_name | default('') | string | length) > 0
+          - var_grafana_image is defined
+          - var_grafana_port is defined
+          - var_grafana_admin_user is defined
+          - var_grafana_admin_email is defined
+          - var_monitorizacion_network is defined
+          - var_grafana_prometheus_url is defined
+        fail_msg: >-
+          Faltan variables de instalacion de Grafana.
+          Configuralas en el inventario AWX (grupo grafana-servers).
+      when: (var_grafana_job05_mode | default('inspect')) == 'install'
 
     - name: Exigir .env protegido para instalacion limpia con SMTP
       ansible.builtin.assert:
         that:
           - var_grafana_existing_env.stat.exists
           - var_grafana_existing_env.stat.isreg | default(false)
+          - not (var_grafana_existing_env.stat.islnk | default(false))
+          - (var_grafana_existing_env.stat.uid | default(-1)) == 0
+          - (var_grafana_existing_env.stat.mode | default('')) == '0600'
         fail_msg: >-
-          SMTP habilitado: crea un .env privado con GRAFANA_SMTP_HOST,
-          GRAFANA_SMTP_USER, GRAFANA_SMTP_PASSWORD y
-          GRAFANA_SMTP_FROM_ADDRESS antes del despliegue.
+          Para SMTP crea previamente un .env root:root 0600 (archivo regular,
+          no enlace simbolico) con GRAFANA_SMTP_HOST, GRAFANA_SMTP_USER,
+          GRAFANA_SMTP_PASSWORD y GRAFANA_SMTP_FROM_ADDRESS.
       when: var_grafana_smtp_enabled | default(false) | bool
 
     - name: Comprobar claves SMTP sin revelar sus valores
@@ -183,6 +282,25 @@
           - docker
           - info
       changed_when: false
+
+    - name: Detectar contenedores del proyecto Compose de Grafana
+      ansible.builtin.command:
+        argv:
+          - docker
+          - ps
+          - -aq
+          - --filter
+          - "label=com.docker.compose.project={{ var_grafana_project_name }}"
+      register: var_grafana_existing_project_containers
+      changed_when: false
+
+    - name: Bloquear un proyecto Compose de Grafana preexistente
+      ansible.builtin.assert:
+        that:
+          - (var_grafana_existing_project_containers.stdout | trim) == ''
+        fail_msg: >-
+          Ya existen contenedores (incluso detenidos) del proyecto Compose
+          indicado. No se duplicara ni se recreara Grafana con este Job 05.
 
     - name: Comprobar Docker Compose
       ansible.builtin.command:

@@ -1,5 +1,5 @@
 ---
-# Copiar y adaptar en las variables del grupo grafana_servers de AWX.
+# Copiar y adaptar en las variables del grupo grafana-servers de AWX.
 
 # var_grafana_install_dir: /ruta/absoluta/grafana
 # var_grafana_project_name: grafana
@@ -14,12 +14,16 @@
 
 # La contraseña se proporciona mediante la credencial de AWX.
 # VAR_GRAFANA_ADMIN_PASSWORD
-# GUARDAS JOB 05 (v1)
-# Por defecto: install => solo instalacion limpia; falla si ya hay Compose o grafana.db.
-# Para revisar la instalacion actual sin modificarla:
+# GUARDAS JOB 05 (v2): ausencia de variable => inspect, nunca install.
+# En el laboratorio existente, configurar en Extra Variables del Job:
 # var_grafana_job05_mode: inspect
-# En una VM nueva, con los prechecks superados:
+#
+# Solo para VM nueva, tras revisar ruta, inventario y permisos:
 # var_grafana_job05_mode: install
-# Para generar un Compose con SMTP en una VM nueva (requiere .env privado previo):
-# var_grafana_smtp_enabled: true
-# Nunca introducir GRAFANA_SMTP_PASSWORD en este YAML o en Git.
+# var_grafana_job05_confirm: INSTALL_NEW_GRAFANA
+# var_grafana_smtp_enabled: false
+#
+# Con SMTP true, la ruta puede preexistir SOLO con un .env root:root 0600;
+# sin SMTP, debe estar vacia o no existir. Nunca usar estas variables
+# de instalacion en el Grafana que ya funciona.
+# VAR_GRAFANA_ADMIN_PASSWORD procede de credencial AWX; no guardar secretos.
