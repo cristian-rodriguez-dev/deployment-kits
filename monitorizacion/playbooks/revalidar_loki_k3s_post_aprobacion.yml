@@ -1,0 +1,65 @@
+---
+# Pilas Observabilidad / deployment-kits / Bloque 19F.
+# Job Template destinado EXCLUSIVAMENTE a un nodo posterior a APROBACION AWX.
+# NO acredita por si solo dicha aprobacion: el control lo aplica AWX RBAC + DAG.
+# Importa el diagnostico 19C para obtener una observacion NUEVA en este job.
+# Sin acciones correctivas, cambios en K3s, notificaciones ni Smart Triage.
+- import_playbook: auditar_loki_k3s_remediacion.yml
+
+- name: Revalidar Loki tras aprobacion sin efectuar recuperacion
+  hosts: prometheus-servers
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Rechazar observaciones ausentes, malformadas o de otro objetivo
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - inventory_hostname == 'ansible_server'
+          - var_loki_diag_observation is defined
+          - var_loki_diag_observation is mapping
+          - var_loki_diag_observation.get('source') == 'kubernetes_api'
+          - var_loki_diag_observation.get('namespace') == 'logging'
+          - var_loki_diag_observation.get('pod') == 'loki-0'
+          - var_loki_diag_observation.get('container') == 'loki'
+          - var_loki_diag_observation.get('pod_found') is boolean
+          - var_loki_diag_observation.get('container_found') is boolean
+          - var_loki_diag_observation.get('ready') is none or var_loki_diag_observation.get('ready') is boolean
+          - var_loki_diag_observation.get('observed_at_utc') is string
+        fail_msg: >-
+          Falta una observacion valida generada en esta ejecucion. No se
+          permite ninguna accion. Revisar el diagnostico 19C y AWX.
+      no_log: true
+
+    - name: Mostrar resultado protegido de revalidacion, sin actuar
+      ansible.builtin.debug:
+        msg:
+          version: loki-awx-postapproval-v1
+          type: revalidation_only
+          target:
+            namespace: logging
+            pod: loki-0
+            container: loki
+          observation:
+            observed_at_utc: "{{ var_loki_diag_observation['observed_at_utc'] }}"
+            pod_found: "{{ var_loki_diag_observation['pod_found'] }}"
+            container_found: "{{ var_loki_diag_observation['container_found'] }}"
+            ready: "{{ var_loki_diag_observation['ready'] }}"
+          status: >-
+            {{ 'no_action' if var_loki_diag_observation['ready'] is sameas true
+               else 'investigate' }}
+          reason_code: >-
+            {{ 'loki_ready' if var_loki_diag_observation['ready'] is sameas true
+               else ('loki_not_ready_requires_investigation'
+                     if var_loki_diag_observation['ready'] is sameas false
+                     else 'loki_readiness_unknown') }}
+          approval_verified: false
+          requires_external_workflow_validation: true
+          requires_human_review: true
+          execution_allowed: false
+          action_executed: false
+          changes_kubernetes: false
+          changes_triage: false
+          changes_notifications: false
