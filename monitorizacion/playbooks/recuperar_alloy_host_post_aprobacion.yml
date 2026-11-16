@@ -1,0 +1,337 @@
+---
+# Pilas Observabilidad / deployment-kits / Bloque 19H
+# Piloto: INICIAR (no reiniciar) alloy.service en un solo host, exclusivamente
+# tras aprobacion humana en un workflow AWX separado. Modo AUDIT por defecto.
+# La aprobacion NO se verifica en este playbook: depende de AWX DAG y RBAC.
+- name: Diagnosticar o iniciar Alloy Host con precondiciones estrictas
+  hosts: prometheus-servers
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+
+  vars:
+    var_alloy_recovery_mode_effective: "{{ var_alloy_recovery_mode | default('audit') }}"
+    var_alloy_recovery_confirmation_effective: "{{ var_alloy_recovery_confirmation | default('') }}"
+
+  pre_tasks:
+    - name: Fijar host y modos aceptados; rechazar check mode
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - inventory_hostname == 'ansible_server'
+          - var_alloy_recovery_mode_effective in ['audit', 'apply']
+          - var_alloy_recovery_mode_effective != 'apply' or var_alloy_recovery_confirmation_effective == 'START_ALLOY_ONLY_AFTER_AWX_APPROVAL'
+          - not ansible_check_mode
+        fail_msg: >-
+          Operacion no autorizada. Solo ansible_server, audit/apply y
+          confirmacion fija desde un Job Template protegido por AWX.
+
+  tasks:
+    - name: Consultar estado exacto de alloy.service
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - alloy.service
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=SubState
+          - --property=User
+          - --property=Group
+          - --property=CanStart
+          - --property=NeedDaemonReload
+          - --no-pager
+      register: var_alloy_recovery_initial
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Interpretar estado sin leer logs
+      ansible.builtin.set_fact:
+        var_alloy_recovery_active: >-
+          {{ (var_alloy_recovery_initial.stdout_lines | select('match', '^ActiveState=')
+             | list | first | default('ActiveState=unknown'))
+             | regex_replace('^ActiveState=', '') }}
+      changed_when: false
+
+    - name: Verificar que es el servicio esperado, instalado y endurecido
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_initial.rc == 0
+          - "'LoadState=loaded' in var_alloy_recovery_initial.stdout_lines"
+          - "'User=alloy' in var_alloy_recovery_initial.stdout_lines"
+          - "'Group=alloy' in var_alloy_recovery_initial.stdout_lines"
+          - "'CanStart=yes' in var_alloy_recovery_initial.stdout_lines"
+          - "'NeedDaemonReload=no' in var_alloy_recovery_initial.stdout_lines"
+          - var_alloy_recovery_active in ['active', 'inactive', 'failed']
+        fail_msg: >-
+          Servicio ausente, sin hardening esperado, bloqueado o en transicion.
+          Solo investigar; no se inicia ni modifica nada.
+      no_log: true
+
+    - name: Consultar estado de la configuracion cuando Alloy esta inactivo
+      ansible.builtin.stat:
+        path: /etc/alloy/config.alloy
+        follow: false
+      register: var_alloy_recovery_config_stat
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Consultar almacenamiento propio del host
+      ansible.builtin.stat:
+        path: /var/lib/alloy
+        follow: false
+      register: var_alloy_recovery_storage_stat
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Consultar archivo de posicion del journal si existe
+      ansible.builtin.stat:
+        path: /var/lib/alloy/data/loki.source.journal.host/positions.yml
+        follow: false
+      register: var_alloy_recovery_positions_stat
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Consultar directorio de posiciones del journal si existe
+      ansible.builtin.stat:
+        path: /var/lib/alloy/data/loki.source.journal.host
+        follow: false
+      register: var_alloy_recovery_journal_dir_stat
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Validar precondiciones de almacenamiento y permisos sin corregirlos
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_config_stat.stat.isreg | default(false)
+          - not (var_alloy_recovery_config_stat.stat.islnk | default(false))
+          - (var_alloy_recovery_config_stat.stat.size | default(0) | int) > 100
+          - var_alloy_recovery_storage_stat.stat.isdir | default(false)
+          - not (var_alloy_recovery_storage_stat.stat.islnk | default(false))
+          - var_alloy_recovery_storage_stat.stat.pw_name | default('') == 'alloy'
+          - not (var_alloy_recovery_positions_stat.stat.exists | default(false)) or (var_alloy_recovery_positions_stat.stat.isreg | default(false) and var_alloy_recovery_positions_stat.stat.pw_name | default('') == 'alloy')
+          - not (var_alloy_recovery_journal_dir_stat.stat.exists | default(false)) or (var_alloy_recovery_journal_dir_stat.stat.isdir | default(false) and var_alloy_recovery_journal_dir_stat.stat.pw_name | default('') == 'alloy')
+        fail_msg: >-
+          Precondiciones incumplidas: configuracion, directorio Alloy o
+          posiciones journal. No se reparan permisos automaticamente.
+      when: var_alloy_recovery_active == 'inactive'
+      no_log: true
+
+    - name: Verificar permiso real de escritura del usuario alloy
+      ansible.builtin.command:
+        argv:
+          - runuser
+          - -u
+          - alloy
+          - --
+          - test
+          - -w
+          - /var/lib/alloy
+      register: var_alloy_recovery_storage_write
+      changed_when: false
+      failed_when: false
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Verificar permiso real sobre el directorio de journal, si existe
+      ansible.builtin.command:
+        argv:
+          - runuser
+          - -u
+          - alloy
+          - --
+          - test
+          - -w
+          - /var/lib/alloy/data/loki.source.journal.host
+      register: var_alloy_recovery_journal_write
+      changed_when: false
+      failed_when: false
+      when:
+        - var_alloy_recovery_active == 'inactive'
+        - var_alloy_recovery_journal_dir_stat.stat.exists | default(false)
+
+    - name: Verificar permiso real sobre positions.yml, si existe
+      ansible.builtin.command:
+        argv:
+          - runuser
+          - -u
+          - alloy
+          - --
+          - test
+          - -w
+          - /var/lib/alloy/data/loki.source.journal.host/positions.yml
+      register: var_alloy_recovery_positions_write
+      changed_when: false
+      failed_when: false
+      when:
+        - var_alloy_recovery_active == 'inactive'
+        - var_alloy_recovery_positions_stat.stat.exists | default(false)
+
+    - name: Validar que Alloy puede escribir en los destinos existentes
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_storage_write.rc == 0
+          - not (var_alloy_recovery_journal_dir_stat.stat.exists | default(false)) or var_alloy_recovery_journal_write.rc == 0
+          - not (var_alloy_recovery_positions_stat.stat.exists | default(false)) or var_alloy_recovery_positions_write.rc == 0
+        fail_msg: >-
+          El usuario alloy no puede escribir en almacenamiento/journal.
+          No intentar iniciar hasta resolver manualmente.
+      when: var_alloy_recovery_active == 'inactive'
+      no_log: true
+
+    - name: Validar configuracion Alloy sin cargarla en systemd
+      ansible.builtin.command:
+        argv:
+          - alloy
+          - validate
+          - /etc/alloy/config.alloy
+      register: var_alloy_recovery_validate
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Exigir configuracion valida
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_validate.rc == 0
+        fail_msg: La configuracion de Alloy no pasa validacion; no se inicia.
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Consultar Deployment Alloy K3s y detectar almacenamiento compartido
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=10s
+          - -n
+          - logging
+          - get
+          - deployment
+          - alloy
+          - -o
+          - json
+      register: var_alloy_recovery_k3s_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Rechazar K3s inaccesible antes de iniciar el Alloy del host
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_k3s_raw.rc == 0
+          - var_alloy_recovery_k3s_raw.stdout | length > 0
+        fail_msg: No se pudo verificar que el K3s Alloy tenga almacenamiento independiente.
+      when: var_alloy_recovery_active == 'inactive'
+      no_log: true
+
+    - name: Analizar exclusivamente los hostPath del Deployment Alloy K3s
+      ansible.builtin.set_fact:
+        var_alloy_recovery_k3s: "{{ var_alloy_recovery_k3s_raw.stdout | from_json }}"
+      no_log: true
+      when: var_alloy_recovery_active == 'inactive'
+
+    - name: Validar identidad del Deployment K3s
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_k3s.get('kind') == 'Deployment'
+          - var_alloy_recovery_k3s.get('metadata', {}).get('name') == 'alloy'
+          - var_alloy_recovery_k3s.get('metadata', {}).get('namespace') == 'logging'
+        fail_msg: No se pudo verificar la identidad del Alloy de K3s.
+      when: var_alloy_recovery_active == 'inactive'
+      no_log: true
+
+    - name: Obtener hostPaths del Deployment K3s
+      ansible.builtin.set_fact:
+        var_alloy_recovery_k3s_hostpaths: >-
+          {{ (var_alloy_recovery_k3s['spec']['template']['spec'].get('volumes') or [])
+             | selectattr('hostPath', 'defined')
+             | map(attribute='hostPath.path') | list }}
+      when: var_alloy_recovery_active == 'inactive'
+      no_log: true
+
+    - name: Exigir separacion de almacenamiento entre host y K3s
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_k3s_hostpaths | length > 0
+          - "'/var/lib/alloy-k3s' in var_alloy_recovery_k3s_hostpaths"
+          - >-
+            var_alloy_recovery_k3s_hostpaths
+            | select('match', '^/var/lib/alloy(/|$)') | list | length == 0
+        fail_msg: K3s no acredita almacenamiento separado; no se inicia Alloy Host.
+      when: var_alloy_recovery_active == 'inactive'
+      no_log: true
+
+    - name: Rechazar reinicio por servicio fallido o transitorio
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_active != 'failed'
+        fail_msg: Alloy se encuentra en estado failed. Requiere investigacion manual, no start automatico.
+
+    - name: Reconsultar estado inmediatamente antes de una eventual accion
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - alloy.service
+          - --property=ActiveState
+          - --no-pager
+      register: var_alloy_recovery_recheck
+      changed_when: false
+      failed_when: false
+      when: var_alloy_recovery_mode_effective == 'apply'
+
+    - name: Exigir que el servicio siga estable antes del inicio
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_recheck.rc == 0
+          - var_alloy_recovery_recheck.stdout | trim in ['ActiveState=active', 'ActiveState=inactive']
+          - var_alloy_recovery_active == 'inactive' or var_alloy_recovery_recheck.stdout | trim == 'ActiveState=active'
+        fail_msg: El estado cambio o no es seguro; no se inicia Alloy.
+      when: var_alloy_recovery_mode_effective == 'apply'
+
+    - name: Iniciar exclusivamente Alloy si sigue inactivo y hay aprobacion externa
+      ansible.builtin.systemd_service:
+        name: alloy.service
+        state: started
+      register: var_alloy_recovery_start
+      when:
+        - var_alloy_recovery_mode_effective == 'apply'
+        - var_alloy_recovery_active == 'inactive'
+        - var_alloy_recovery_recheck.stdout | trim == 'ActiveState=inactive'
+
+    - name: Comprobar estado posterior sin reiniciar
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - alloy.service
+          - --property=ActiveState
+          - --no-pager
+      register: var_alloy_recovery_final
+      changed_when: false
+      failed_when: false
+      when: var_alloy_recovery_mode_effective == 'apply'
+
+    - name: Exigir servicio activo tras el modo APPLY
+      ansible.builtin.assert:
+        that:
+          - var_alloy_recovery_final.rc == 0
+          - var_alloy_recovery_final.stdout | trim == 'ActiveState=active'
+        fail_msg: Alloy no ha quedado activo. Investigar sin reintentos automaticos.
+      when: var_alloy_recovery_mode_effective == 'apply'
+
+    - name: Mostrar solo resultado protegido
+      ansible.builtin.debug:
+        msg:
+          version: alloy-host-awx-recovery-v1
+          mode: "{{ var_alloy_recovery_mode_effective }}"
+          service: alloy.service
+          initial_state: "{{ var_alloy_recovery_active }}"
+          status: >-
+            {{ 'no_action' if var_alloy_recovery_active == 'active'
+               else ('ready_for_manual_approval' if var_alloy_recovery_mode_effective == 'audit'
+                     else ('started_and_verified' if var_alloy_recovery_start.changed | default(false)
+                           else 'no_action_state_changed')) }}
+          action_executed: "{{ var_alloy_recovery_start.changed | default(false) }}"
+          changes_notifications: false
+          changes_triage: false
+          changes_k3s: false
+          approval_verified: false
+          requires_external_workflow_validation: true
