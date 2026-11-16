@@ -1,0 +1,136 @@
+---
+# Pilas Observabilidad / deployment-kits / Bloque 19C.
+# AWX, EJECUCIÓN MANUAL. Solo lectura, sin cambios en Kubernetes ni en el bot.
+# El resultado es una OBSERVACIÓN; NO establece observation_trusted=True.
+- name: Diagnosticar Loki en K3s para remediacion consultiva
+  hosts: prometheus-servers
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+
+  tasks:
+    - name: Exigir un unico host del inventario autorizado
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - inventory_hostname == 'ansible_server'
+        fail_msg: >-
+          Este diagnostico solo se permite para el host ansible_server.
+          Revisar inventario y limite del Job Template de AWX.
+
+    - name: Comprobar disponibilidad de la API de K3s
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=10s
+          - get
+          - --raw=/readyz
+      register: var_loki_diag_api
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Exigir una API Kubernetes accesible
+      ansible.builtin.assert:
+        that:
+          - var_loki_diag_api.rc == 0
+          - var_loki_diag_api.stdout | trim == 'ok'
+        fail_msg: >-
+          API Kubernetes inaccesible. Diagnostico no disponible;
+          no interpretar el fallo como Loki no preparado.
+
+    - name: Consultar exclusivamente el pod logging/loki-0
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --request-timeout=10s
+          - -n
+          - logging
+          - get
+          - pod
+          - loki-0
+          - -o
+          - json
+          - --ignore-not-found
+      register: var_loki_diag_pod_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Exigir consulta valida, sin tratar errores como ausencia de pod
+      ansible.builtin.assert:
+        that:
+          - var_loki_diag_pod_raw.rc == 0
+        fail_msg: >-
+          No se pudo consultar Loki en K3s. Resultado no verificable;
+          no se propone ninguna recuperacion.
+
+    - name: Interpretar respuesta de Kubernetes de forma interna
+      ansible.builtin.set_fact:
+        var_loki_diag_pod: >-
+          {{ (var_loki_diag_pod_raw.stdout | from_json)
+             if (var_loki_diag_pod_raw.stdout | trim | length > 0) else {} }}
+      no_log: true
+
+    - name: Rechazar recursos de otro tipo o identidad
+      ansible.builtin.assert:
+        that:
+          - >-
+            var_loki_diag_pod == {} or
+            (var_loki_diag_pod is mapping and
+             var_loki_diag_pod.get('kind') == 'Pod' and
+             (var_loki_diag_pod.get('metadata') or {}).get('name') == 'loki-0' and
+             (var_loki_diag_pod.get('metadata') or {}).get('namespace') == 'logging')
+        fail_msg: La API devolvio un recurso con identidad inesperada.
+      no_log: true
+
+    - name: Extraer exclusivamente estado de contenedor declarado y observado
+      ansible.builtin.set_fact:
+        var_loki_diag_declared: >-
+          {{ ((var_loki_diag_pod.get('spec') or {}).get('containers') or [])
+             | selectattr('name', 'equalto', 'loki') | list }}
+        var_loki_diag_statuses: >-
+          {{ ((var_loki_diag_pod.get('status') or {}).get('containerStatuses') or [])
+             | selectattr('name', 'equalto', 'loki') | list }}
+      no_log: true
+
+    - name: Rechazar datos malformados o identidades duplicadas
+      ansible.builtin.assert:
+        that:
+          - var_loki_diag_declared is sequence
+          - var_loki_diag_statuses is sequence
+          - var_loki_diag_declared | length <= 1
+          - var_loki_diag_statuses | length <= 1
+        fail_msg: Respuesta Kubernetes no valida para el contenedor Loki.
+      no_log: true
+
+    - name: Construir observacion acotada sin datos sensibles
+      ansible.builtin.set_fact:
+        var_loki_diag_observation:
+          source: kubernetes_api
+          namespace: logging
+          pod: loki-0
+          container: loki
+          pod_found: "{{ var_loki_diag_pod | length > 0 }}"
+          container_found: "{{ var_loki_diag_declared | length == 1 }}"
+          ready: >-
+            {{ var_loki_diag_statuses[0]['ready']
+               if (var_loki_diag_declared | length == 1 and
+                   var_loki_diag_statuses | length == 1 and
+                   var_loki_diag_statuses[0].get('ready') is boolean)
+               else none }}
+          observed_at_utc: "{{ now(utc=True, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+      no_log: true
+
+    - name: Mostrar solo observacion apta para revision manual
+      ansible.builtin.debug:
+        msg:
+          version: loki-k3s-awx-diagnostic-v1
+          type: observation_only
+          observation: "{{ var_loki_diag_observation }}"
+          verified_provenance: false
+          requires_external_job_validation: true
+          changes_kubernetes: false
+          changes_triage: false
+          changes_notifications: false
+          execution_allowed: false
