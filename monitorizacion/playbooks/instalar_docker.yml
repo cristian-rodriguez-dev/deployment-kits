@@ -16,7 +16,16 @@
       - docker-buildx-plugin
       - docker-compose-plugin
 
-    var_docker_usuario: "{{ ansible_user }}"
+    var_docker_usuario: "{{ ansible_user | default(ansible_user_id) }}"
+
+    # Job 01: deliberadamente SOLO instalacion limpia Ubuntu 24.04.
+    # Sin confirmacion, el playbook falla ANTES de escribir en el host.
+    var_docker_install_mode: "blocked"
+    var_docker_install_confirm: ""
+    var_docker_versiones_ubuntu: ["24.04"]
+    var_docker_marker: "/etc/deployment-kits/docker-clean-install-2404"
+    # El grupo docker da privilegios equivalentes a root: opt-in.
+    var_docker_agregar_usuario_grupo: false
 
     var_docker_default_address_pools:
       - base: "172.20.0.0/16"
@@ -24,12 +33,162 @@
 
     var_docker_servicio: docker
 
-  tasks:
-    - name: Comprobar que el sistema operativo es Ubuntu
+  pre_tasks:
+    - name: Validar contrato de instalacion nueva antes de cualquier escritura
       ansible.builtin.assert:
         that:
           - ansible_distribution == "Ubuntu"
-        fail_msg: "Este playbook solo está preparado para Ubuntu."
+          - ansible_distribution_version in var_docker_versiones_ubuntu
+          - ansible_architecture in ["x86_64", "aarch64"]
+          - var_docker_install_mode == "install"
+          - var_docker_install_confirm == "INSTALL_NEW_DOCKER_2404"
+          - var_docker_agregar_usuario_grupo is boolean
+          - var_docker_default_address_pools is sequence
+          - var_docker_default_address_pools is not string
+          - var_docker_default_address_pools | length > 0
+        fail_msg: >-
+          Job 01 bloqueado. Exclusivamente Ubuntu 24.04 sobre una VM NUEVA.
+          Requiere var_docker_install_mode=install y
+          var_docker_install_confirm=INSTALL_NEW_DOCKER_2404.
+          No ejecutar sobre el laboratorio existente.
+
+    - name: Detectar si este playbook inicio previamente la instalacion
+      ansible.builtin.stat:
+        path: "{{ var_docker_marker }}"
+        follow: false
+      register: var_docker_marker_stat
+
+    - name: Leer marca de instalacion gestionada
+      ansible.builtin.slurp:
+        src: "{{ var_docker_marker }}"
+      register: var_docker_marker_bytes
+      when: var_docker_marker_stat.stat.isreg | default(false)
+
+    - name: Rechazar marcas inesperadas o enlaces simbolicos
+      ansible.builtin.assert:
+        that:
+          - var_docker_marker_stat.stat.isreg | default(false)
+          - (var_docker_marker_bytes.content | b64decode) == "deployment-kits-docker-clean-v1\n"
+        fail_msg: >-
+          Marca Docker existente no reconocida. Revisar manualmente; este Job
+          no adopta ni repara instalaciones desconocidas.
+      when: var_docker_marker_stat.stat.exists
+
+    - name: Detectar Docker existente en una maquina no gestionada
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /usr/bin/docker
+        - /usr/local/bin/docker
+        - /snap/bin/docker
+        - /usr/bin/dockerd
+        - /var/lib/docker
+        - /var/lib/containerd
+        - /etc/docker/daemon.json
+        - /etc/apt/sources.list.d/docker.list
+        - /etc/apt/sources.list.d/docker.sources
+      register: var_docker_existing_paths
+      when: not var_docker_marker_stat.stat.exists
+
+    - name: Detectar paquetes Docker o runtime existentes
+      ansible.builtin.package_facts:
+        manager: apt
+      when: not var_docker_marker_stat.stat.exists
+
+    - name: Rechazar instalacion o datos previos en host no gestionado
+      ansible.builtin.assert:
+        that:
+          - >-
+            (var_docker_existing_paths.results
+             | selectattr('stat.exists', 'defined')
+             | selectattr('stat.exists') | list | length) == 0
+          - >-
+            (ansible_facts.packages.keys() | list | intersect([
+              'docker.io', 'docker-ce', 'docker-ce-cli', 'containerd.io',
+              'containerd', 'runc', 'podman-docker', 'docker-compose',
+              'docker-compose-v2', 'docker-buildx', 'docker-buildx-plugin',
+              'docker-compose-plugin'
+            ]) | length) == 0
+        fail_msg: >-
+          Docker, containerd, datos o configuracion anterior detectados.
+          No se sobrescribe ni adopta el sistema. Usar una VM limpia.
+      when: not var_docker_marker_stat.stat.exists
+
+    - name: Detectar configuracion Docker de una ejecucion anterior
+      ansible.builtin.stat:
+        path: /etc/docker/daemon.json
+        follow: false
+      register: var_docker_daemon_stat
+      when: var_docker_marker_stat.stat.exists
+
+    - name: Detectar binarios y datos en un reintento incompleto
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /usr/bin/docker
+        - /var/lib/docker
+        - /var/lib/containerd
+      register: var_docker_retry_paths
+      when: var_docker_marker_stat.stat.exists
+
+    - name: Rechazar reintentos sin daemon.json si ya existen datos o binarios
+      ansible.builtin.assert:
+        that:
+          - >-
+            (not (var_docker_daemon_stat.stat.exists | default(false)))
+            or (var_docker_daemon_stat.stat.isreg | default(false))
+          - >-
+            (var_docker_daemon_stat.stat.isreg | default(false))
+            or (var_docker_retry_paths.results
+               | selectattr('stat.exists', 'defined')
+               | selectattr('stat.exists') | list | length) == 0
+        fail_msg: >-
+          Instalacion Docker parcialmente modificada o con datos sin
+          daemon.json. Detener y revisar manualmente; no sobrescribir.
+      when: var_docker_marker_stat.stat.exists
+
+    - name: Leer configuracion existente sin modificarla
+      ansible.builtin.slurp:
+        src: /etc/docker/daemon.json
+      register: var_docker_daemon_bytes
+      when:
+        - var_docker_marker_stat.stat.exists
+        - var_docker_daemon_stat.stat.isreg | default(false)
+
+    - name: Rechazar cambios ajenos sobre el daemon gestionado
+      ansible.builtin.assert:
+        that:
+          - var_docker_daemon_stat.stat.isreg | default(false)
+          - >-
+            (var_docker_daemon_bytes.content | b64decode | from_json)
+            == {'default-address-pools': var_docker_default_address_pools}
+        fail_msg: >-
+          La configuracion Docker no coincide con la instalacion inicial.
+          No se sobrescribe daemon.json ni se reinicia Docker.
+      when:
+        - var_docker_marker_stat.stat.exists
+        - var_docker_daemon_stat.stat.isreg | default(false)
+
+  tasks:
+    - name: Crear directorio de marcas de instalacion gestionada
+      ansible.builtin.file:
+        path: /etc/deployment-kits
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when: not var_docker_marker_stat.stat.exists
+
+    - name: Registrar inicio de instalacion propia para reintentos idempotentes
+      ansible.builtin.copy:
+        dest: "{{ var_docker_marker }}"
+        content: "deployment-kits-docker-clean-v1\n"
+        owner: root
+        group: root
+        mode: "0600"
+      when: not var_docker_marker_stat.stat.exists
 
     - name: Actualizar la caché de paquetes APT
       ansible.builtin.apt:
@@ -72,48 +231,73 @@
         state: present
         update_cache: true
 
-    - name: Instalar Docker y sus componentes
-      ansible.builtin.apt:
-        name: "{{ var_docker_paquetes }}"
-        state: present
-        update_cache: true
+    # Crear daemon.json ANTES del apt install evita reinicios por handlers.
+    # Solo la primera instalacion puede escribir este fichero.
+    - name: Crear directorio de configuracion Docker en la VM limpia
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: >-
+        (not var_docker_marker_stat.stat.exists)
+        or (not (var_docker_daemon_stat.stat.exists | default(false)))
 
-    - name: Crear el grupo docker
-      ansible.builtin.group:
-        name: docker
-        state: present
-
-    - name: Añadir el usuario al grupo docker
-      ansible.builtin.user:
-        name: "{{ var_docker_usuario }}"
-        groups:
-          - docker
-        append: true
-
-    - name: Configurar el daemon de Docker
+    - name: Configurar pools de red ANTES de instalar Docker
       ansible.builtin.copy:
         dest: /etc/docker/daemon.json
         owner: root
         group: root
         mode: "0644"
         content: |
-          {{
-            {
-              'default-address-pools':
-              var_docker_default_address_pools
-            } | to_nice_json
-          }}
-        validate: "dockerd --validate --config-file %s"
-      notify: Reiniciar Docker
+          {{ {'default-address-pools': var_docker_default_address_pools} | to_nice_json }}
+      when: >-
+        (not var_docker_marker_stat.stat.exists)
+        or (not (var_docker_daemon_stat.stat.exists | default(false)))
 
-    - name: Habilitar e iniciar Docker
+    - name: Instalar Docker y sus componentes
+      ansible.builtin.apt:
+        name: "{{ var_docker_paquetes }}"
+        state: present
+        update_cache: true
+
+    - name: Crear el grupo docker si se ha autorizado acceso no root
+      ansible.builtin.group:
+        name: docker
+        state: present
+      when: var_docker_agregar_usuario_grupo
+
+    - name: Añadir usuario a docker solo por autorizacion explicita
+      ansible.builtin.user:
+        name: "{{ var_docker_usuario }}"
+        groups:
+          - docker
+        append: true
+      when: var_docker_agregar_usuario_grupo
+
+    - name: Habilitar e iniciar Docker sin reiniciar un servicio activo
       ansible.builtin.systemd_service:
         name: "{{ var_docker_servicio }}"
         enabled: true
         state: started
 
-    - name: Aplicar los cambios pendientes
-      ansible.builtin.meta: flush_handlers
+    - name: Validar la configuracion del daemon
+      ansible.builtin.command:
+        argv:
+          - dockerd
+          - --validate
+          - --config-file
+          - /etc/docker/daemon.json
+      changed_when: false
+
+    - name: Comprobar respuesta del daemon de Docker
+      ansible.builtin.command:
+        argv:
+          - docker
+          - info
+      changed_when: false
+      no_log: true
 
     - name: Comprobar la versión de Docker
       ansible.builtin.command:
@@ -137,9 +321,3 @@
         msg:
           - "{{ var_docker_version.stdout }}"
           - "{{ var_docker_compose_version.stdout }}"
-
-  handlers:
-    - name: Reiniciar Docker
-      ansible.builtin.systemd_service:
-        name: "{{ var_docker_servicio }}"
-        state: restarted

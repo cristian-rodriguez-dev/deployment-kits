@@ -4,6 +4,9 @@ Guía para instalar Wazuh, Prometheus, Node Exporter y Grafana en Ubuntu mediant
 
 Las variables se configuran en el inventario de AWX y las contraseñas se guardan en sus credenciales.
 
+
+> **Actualización de la fase de automatización:** esta guía describe el flujo heredado y no un despliegue reproducible completo. La primera etapa nueva trabaja solo sobre **VM Ubuntu Server 24.04 limpia**, sin adopción. El Job 01 Docker conserva su playbook original pero ahora queda bloqueado por defecto y exige `var_docker_install_mode: install` y `var_docker_install_confirm: INSTALL_NEW_DOCKER_2404`. Véase [DOCKER_INSTALACION_LIMPIA_2404.md](docs/DOCKER_INSTALACION_LIMPIA_2404.md). No ejecutar el Job 01 sobre servidores existentes.
+
 ## Índice
 
 1. [Alcance](#1-alcance)

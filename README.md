@@ -74,6 +74,12 @@ Nunca ejecutar `docker compose down -v` en una instalación con datos que deban 
 - [Traefik, Loki y Wazuh](monitorizacion/docs/TRAEFIK_LOKI_WAZUH.md)
 - [Integración de métricas del bot](monitorizacion/TRIAGE_METRICS_AWX.md)
 
+## Fase actual: instalación limpia antes que adopción
+
+Objetivo de la fase: automatizar **instalaciones desde cero en Ubuntu Server 24.04**, probar un workflow maestro reproducible en VMs nuevas, y después preparar compatibilidad 26.04. La adopción y los cambios en instalaciones existentes quedan para más adelante.
+
+**Job 01 Docker:** se ha adaptado `monitorizacion/playbooks/instalar_docker.yml` para exigir confirmación explícita, rechazar hosts ajenos y evitar reinicios sobre configuraciones existentes. Ver [guía de instalación limpia Docker 24.04](monitorizacion/docs/DOCKER_INSTALACION_LIMPIA_2404.md) y [variables de ejemplo](monitorizacion/examples/variables_docker_clean_2404.yml). **Nunca probar el Job 01 en el laboratorio actual.**
+
 ## Pendiente para el workflow maestro
 
 - Auditar preflight, inventarios, credenciales y dependencias antes de construir el workflow.

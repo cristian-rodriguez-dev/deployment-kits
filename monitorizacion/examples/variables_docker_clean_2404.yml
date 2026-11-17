@@ -1,0 +1,21 @@
+---
+# JOB 01 - INSTALACION LIMPIA DOCKER (Ubuntu 24.04). SOLO VM NUEVA.
+# No utilizar en el laboratorio antiguo ni en hosts con Docker/containerd.
+
+# Activa exclusivamente la ruta de instalacion. Por defecto el playbook bloquea.
+var_docker_install_mode: install
+
+# Confirmacion explicita de que la VM esta recien creada y sin datos Docker.
+var_docker_install_confirm: INSTALL_NEW_DOCKER_2404
+
+# Opcional: false por seguridad, porque el grupo docker equivale a root.
+var_docker_agregar_usuario_grupo: false
+
+# Opcional: cuenta a incorporar al grupo docker si se autoriza el opt-in.
+# var_docker_usuario: usuario_ssh
+
+# Opcional: pools Docker; cambiar ANTES de la primera instalacion.
+# No cambiar en la segunda ejecucion: falla cerrado para evitar reinicios.
+# var_docker_default_address_pools:
+#   - base: "172.20.0.0/16"
+#     size: 24
