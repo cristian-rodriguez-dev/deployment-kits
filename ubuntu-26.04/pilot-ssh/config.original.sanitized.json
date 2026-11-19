@@ -1,0 +1,19 @@
+{
+  "block_seconds": 180,
+  "chain": "WAZUH_SSH_BLOCK",
+  "enable_ipv6": false,
+  "excluded_log_sources": [
+    "/var/ossec/logs/geoip-lab.log"
+  ],
+  "protected_ips": [],
+  "protected_networks": [
+    "127.0.0.0/8",
+    "192.168.56.0/24",
+    "::1/128"
+  ],
+  "recovery_seconds": 240,
+  "rules": [
+    "5763"
+  ],
+  "ssh_port": 22
+}

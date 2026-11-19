@@ -1,0 +1,4 @@
+services:
+  wazuh.manager:
+    volumes:
+      - /srv/traefik-wazuh-bridge/events:/var/ossec/traefik-bridge:ro

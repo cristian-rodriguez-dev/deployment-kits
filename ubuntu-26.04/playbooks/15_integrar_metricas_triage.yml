@@ -1,0 +1,95 @@
+---
+- name: 15 | Conectar métricas autenticadas Security Triage con Prometheus
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+  vars:
+    triage_metrics_token: "{{ lookup('ansible.builtin.env', 'VAR_TRIAGE_METRICS_TOKEN') }}"
+    triage_compose:
+      - docker-compose.yml
+      - compose.triage-metrics.yml
+  tasks:
+    - name: Exigir token de métricas independiente
+      ansible.builtin.assert:
+        that:
+          - triage_metrics_token | length >= 32
+          - var_prometheus_install_dir is defined
+          - var_triage_bot_install_dir is defined
+      no_log: true
+
+    - name: Comprobar que existe la red privada creada por el bot
+      ansible.builtin.command:
+        argv: [docker, network, inspect, triage-metrics-private]
+      register: triage_network_result
+      changed_when: false
+      no_log: true
+
+    - name: Exigir red interna de Docker
+      ansible.builtin.assert:
+        that:
+          - (triage_network_result.stdout | from_json)[0].Internal | bool
+          - (triage_network_result.stdout | from_json)[0].Driver == 'bridge'
+
+    - name: Instalar token con acceso del usuario Prometheus
+      ansible.builtin.copy:
+        content: "{{ triage_metrics_token }}"
+        dest: "{{ var_prometheus_install_dir }}/prometheus/triage_metrics_token"
+        owner: root
+        group: '65534'
+        mode: '0640'
+      no_log: true
+      diff: false
+
+    - name: Declarar job del bot sin alterar el archivo principal
+      ansible.builtin.copy:
+        src: ../templates/integration/triage-scrape.yml
+        dest: "{{ var_prometheus_install_dir }}/prometheus/scrape.d/security-triage.yml"
+        owner: root
+        group: root
+        mode: '0644'
+      register: triage_scrape_config
+
+    - name: Persistir red privada como overlay de Prometheus
+      ansible.builtin.copy:
+        src: ../templates/integration/triage-prometheus-overlay.yml
+        dest: "{{ var_prometheus_install_dir }}/compose.triage-metrics.yml"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Validar YAML combinado de Prometheus
+      ansible.builtin.command:
+        argv: [docker, compose, -p, "{{ var_prometheus_project_name }}", -f, docker-compose.yml, -f, compose.triage-metrics.yml, config, -q]
+        chdir: "{{ var_prometheus_install_dir }}"
+      changed_when: false
+
+    - name: Conectar Prometheus a la red del bot sin borrar TSDB
+      community.docker.docker_compose_v2:
+        project_src: "{{ var_prometheus_install_dir }}"
+        project_name: "{{ var_prometheus_project_name }}"
+        files: "{{ triage_compose }}"
+        services: [prometheus]
+        dependencies: false
+        state: present
+        pull: missing
+        recreate: auto
+
+    - name: Recargar scraping sin recrear Prometheus por cambios de job
+      ansible.builtin.command:
+        argv: [docker, compose, -p, "{{ var_prometheus_project_name }}", -f, docker-compose.yml, -f, compose.triage-metrics.yml, kill, --signal=HUP, prometheus]
+        chdir: "{{ var_prometheus_install_dir }}"
+      when: triage_scrape_config.changed
+
+    - name: Comprobar el target del bot en Prometheus
+      ansible.builtin.uri:
+        url: "http://{{ var_prometheus_bind_address | default('127.0.0.1') }}:{{ var_prometheus_port }}/api/v1/query?query=up%7Bjob%3D%22security-triage-bot%22%7D"
+        return_content: true
+        status_code: 200
+      register: triage_target
+      until: >-
+        triage_target.status | default(0) == 200 and
+        triage_target.json.data.result | default([]) | length == 1 and
+        triage_target.json.data.result[0].value[1] == '1'
+      retries: 12
+      delay: 10
+      changed_when: false

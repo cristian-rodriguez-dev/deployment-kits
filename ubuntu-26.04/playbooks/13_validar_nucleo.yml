@@ -1,0 +1,156 @@
+---
+- name: 13 | Validación funcional del núcleo
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+  vars:
+    prometheus_api: "http://127.0.0.1:{{ var_prometheus_port }}"
+    grafana_api: "http://{{ var_grafana_bind_address | default('127.0.0.1') }}:{{ var_grafana_port }}"
+    local_loki: "http://{{ dk_loki_ip.stdout }}"
+    probes:
+      - job: node-exporter-local
+        query: up{job="node-exporter-local"}
+      - job: docker-cadvisor
+        query: up{job="docker-cadvisor"}
+      - job: kubelet-cadvisor
+        query: up{job="kubelet-cadvisor"}
+      - job: k3s-kube-state-metrics
+        query: up{job="k3s-kube-state-metrics"}
+  tasks:
+    - name: Comprobar métricas reales del host central
+      ansible.builtin.uri:
+        url: "{{ prometheus_api }}/api/v1/query?query={{ item.query | urlencode }}"
+        status_code: 200
+        return_content: true
+      loop: "{{ probes }}"
+      register: query_result
+      retries: 8
+      delay: 15
+      until: query_result.status | default(0) == 200 and (query_result.json.data.result | default([]) | length > 0) and (query_result.json.data.result[0].value[1] | default('0')) == '1'
+      changed_when: false
+
+    - name: Localizar Loki para verificar escritura y lectura
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, logging, get, service, loki-gateway, -o, 'jsonpath={.spec.clusterIP}']
+      register: dk_loki_ip
+      changed_when: false
+
+    - name: Preparar evento de prueba trazable
+      ansible.builtin.set_fact:
+        dk_smoke_timestamp: "{{ lookup('pipe', 'date +%s%N') }}"
+        dk_smoke_event: "deployment-kits-smoke-{{ inventory_hostname }}"
+
+    - name: Escribir evento de prueba en Loki
+      ansible.builtin.uri:
+        url: "{{ local_loki }}/loki/api/v1/push"
+        method: POST
+        body_format: json
+        body:
+          streams:
+            - stream:
+                job: deployment-kits-smoke
+                host: "{{ inventory_hostname }}"
+              values:
+                - ["{{ dk_smoke_timestamp }}", "{{ dk_smoke_event }}"]
+        status_code: [200, 204]
+      changed_when: false
+
+    - name: Consultar evento escrito en Loki
+      ansible.builtin.uri:
+        url: "{{ local_loki }}/loki/api/v1/query?query=%7Bjob%3D%22deployment-kits-smoke%22%7D"
+        status_code: 200
+        return_content: true
+      register: loki_check
+      retries: 10
+      delay: 5
+      until: loki_check.status | default(0) == 200 and loki_check.json.data.result | default([]) | length > 0
+      changed_when: false
+
+    - name: Consultar datasource Prometheus de Grafana
+      ansible.builtin.uri:
+        url: "{{ grafana_api }}/api/datasources/uid/prometheus"
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+        force_basic_auth: true
+        status_code: 200
+      changed_when: false
+      no_log: true
+
+    - name: Consultar datasource Loki de Grafana
+      ansible.builtin.uri:
+        url: "{{ grafana_api }}/api/datasources/uid/cg2sr4544ary8b"
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+        force_basic_auth: true
+        status_code: 200
+      changed_when: false
+      no_log: true
+
+    - name: Consultar métrica Prometheus desde el proxy de Grafana
+      ansible.builtin.uri:
+        url: "{{ grafana_api }}/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+        force_basic_auth: true
+        status_code: 200
+        return_content: true
+      register: grafana_query
+      no_log: true
+      changed_when: false
+    - name: Exigir serie real de Prometheus en Grafana
+      ansible.builtin.assert:
+        that: grafana_query.json.data.result | length > 0
+      no_log: true
+
+    - name: Consultar logs Loki desde el proxy de Grafana
+      ansible.builtin.uri:
+        url: "{{ grafana_api }}/api/datasources/proxy/uid/cg2sr4544ary8b/loki/api/v1/query?query=%7Bjob%3D%22deployment-kits-smoke%22%7D"
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+        force_basic_auth: true
+        status_code: 200
+        return_content: true
+      register: grafana_loki_query
+      no_log: true
+      changed_when: false
+    - name: Exigir log real Loki en Grafana
+      ansible.builtin.assert:
+        that: grafana_loki_query.json.data.result | length > 0
+      no_log: true
+
+    - name: Comprobar Dashboard Grafana original
+      ansible.builtin.uri:
+        url: "{{ grafana_api }}/apis/dashboard.grafana.app/v2/namespaces/default/dashboards/adqmqdw"
+        url_username: "{{ var_grafana_admin_user }}"
+        url_password: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+        force_basic_auth: true
+        status_code: 200
+      changed_when: false
+      no_log: true
+
+    - name: Comprobar salud Wazuh Indexer
+      ansible.builtin.uri:
+        url: https://127.0.0.1:9200/_cluster/health
+        url_username: admin
+        url_password: "{{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code: 200
+        return_content: true
+      register: wazuh_indexer_health
+      no_log: true
+      changed_when: false
+    - name: Verificar que el Indexer no esté en estado red
+      ansible.builtin.assert:
+        that: wazuh_indexer_health.json.status in ['yellow','green']
+      no_log: true
+
+    - name: Confirmar disponibilidad Wazuh Manager
+      ansible.builtin.command:
+        argv: [docker, compose, -p, "{{ var_wazuh_project_name }}", -f, docker-compose.yml, -f, compose.credentials.yml, ps, --status, running]
+        chdir: "{{ var_wazuh_install_dir }}/single-node"
+      changed_when: false
+
+    - name: Resumen del núcleo
+      ansible.builtin.debug:
+        msg: 'Prometheus UP, Loki acepta y consulta eventos, Grafana tiene datasources y dashboards, Wazuh Compose activo. No equivale a validación del bot ni de notificaciones.'

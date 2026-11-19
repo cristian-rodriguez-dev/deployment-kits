@@ -1,0 +1,1011 @@
+{
+  "alert_rules": [
+    {
+      "annotations": {
+        "description": "Notificar DIRECTAMENTE desde Grafana por un canal independiente del bot; verificar tambien salud funcional del bot.",
+        "summary": "El endpoint de metricas del bot de triaje no esta disponible"
+      },
+      "condition": "B",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "1 - (min(up{job=\"security-triage-bot\"}) or vector(0))",
+            "instant": true,
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    0
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "B"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "B",
+            "type": "threshold"
+          },
+          "queryType": "",
+          "refId": "B",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "2m",
+      "id": 8,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "component": "security-triage-bot",
+        "managed_by": "awx",
+        "severity": "warning"
+      },
+      "noDataState": "OK",
+      "notification_settings": {
+        "receiver": "Infraestructura - Emergencias"
+      },
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "Critico - Bot de triaje IA no disponible",
+      "uid": "awx-critical-triage-down",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "annotations": {
+        "description": "Esperados: manager, indexer y dashboard; revisar Docker y cAdvisor. No es un healthcheck funcional de Wazuh.",
+        "summary": "Falta la observacion reciente de uno o mas contenedores Wazuh"
+      },
+      "condition": "B",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "3 - (count(count by (container_label_com_docker_compose_service) (container_last_seen{job=\"docker-cadvisor\",container_label_com_docker_compose_project=\"wazuh\",container_label_com_docker_compose_service=~\"wazuh[.](manager|indexer|dashboard)\"} > time() - 120)) or vector(0))",
+            "instant": true,
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    0
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "B"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "B",
+            "type": "threshold"
+          },
+          "queryType": "",
+          "refId": "B",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "3m",
+      "id": 9,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "component": "wazuh",
+        "managed_by": "awx",
+        "severity": "warning"
+      },
+      "noDataState": "OK",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "Critico - Wazuh con contenedores ausentes",
+      "uid": "awx-critical-wazuh-containers",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "annotations": {
+        "description": "Revisar Loki en namespace logging; excluir pods efimeros helm-install-loki; no comprueba la API de Loki.",
+        "summary": "El contenedor principal loki-0 no esta Ready"
+      },
+      "condition": "B",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "1 - (max(kube_pod_container_status_ready{job=\"kube-state-metrics\",namespace=\"logging\",pod=\"loki-0\",container=\"loki\"}) or vector(0))",
+            "instant": true,
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    0
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "B"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "B",
+            "type": "threshold"
+          },
+          "queryType": "",
+          "refId": "B",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "5m",
+      "id": 10,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "component": "loki",
+        "managed_by": "awx",
+        "severity": "warning"
+      },
+      "noDataState": "OK",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "Critico - Loki no disponible",
+      "uid": "awx-critical-loki-notready",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "annotations": {
+        "description": "Revisar el Deployment, sus Pods, eventos y disponibilidad de nodos.",
+        "summary": "Deployment K3s con replicas deseadas sin disponibilidad durante 5 minutos"
+      },
+      "condition": "B",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "clamp_min(max by (namespace, deployment) (kube_deployment_spec_replicas) - on (namespace, deployment) max by (namespace, deployment) (kube_deployment_status_replicas_available), 0)",
+            "instant": true,
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    0
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "B"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "B",
+            "type": "threshold"
+          },
+          "queryType": "",
+          "refId": "B",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "5m",
+      "id": 6,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "component": "k3s",
+        "managed_by": "awx",
+        "severity": "warning"
+      },
+      "noDataState": "OK",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "K3s - Deployment sin replicas disponibles",
+      "uid": "awx-k3s-deploy-unavail",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "annotations": {
+        "description": "Revisar logs del contenedor, eventos del Pod y reinicios.",
+        "summary": "Contenedor K3s en CrashLoopBackOff durante 5 minutos"
+      },
+      "condition": "B",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "max by (namespace, pod, container) (\r\n  kube_pod_container_status_waiting_reason{\r\n    reason=\"CrashLoopBackOff\"\r\n  }\r\n) or vector(0)",
+            "instant": true,
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    0
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "B"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "B",
+            "type": "threshold"
+          },
+          "queryType": "",
+          "refId": "B",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "5m",
+      "id": 7,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "component": "k3s",
+        "managed_by": "awx",
+        "severity": "warning"
+      },
+      "noDataState": "OK",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "K3s - Contenedor en CrashLoopBackOff",
+      "uid": "awx-k3s-crashloop",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "annotations": {
+        "Host sin respuesta: {{ $labels.nodename }}": "Prometheus no consigue recopilar métricas del host {{ $labels.instance }} (job {{ $labels.job }})."
+      },
+      "condition": "C",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "editorMode": "code",
+            "expr": "up{job=~\"inventario-Sistemas|inventario-Devs|node-exporter-local\"}",
+            "instant": true,
+            "intervalMs": 1000,
+            "legendFormat": "__auto",
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    1
+                  ],
+                  "type": "lt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "C"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "C",
+            "type": "threshold"
+          },
+          "queryType": "expression",
+          "refId": "C",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "2m",
+      "id": 1,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "category": "availability",
+        "severity": "high",
+        "triage": "enabled"
+      },
+      "noDataState": "NoData",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "Host Down - Sistemas y Devs",
+      "uid": "bg3s5sj18gfswb",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "condition": "C",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "editorMode": "code",
+            "expr": "100 * (\r\n  1 - avg by (job, instance, nodename) (\r\n    rate(node_cpu_seconds_total{\r\n      job=~\"inventario-Sistemas|inventario-Devs|node-exporter-local\",\r\n      mode=\"idle\"\r\n    }[5m])\r\n  )\r\n)",
+            "instant": true,
+            "intervalMs": 1000,
+            "legendFormat": "__auto",
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": []
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "reducer": "last",
+            "refId": "B",
+            "type": "reduce"
+          },
+          "queryType": "expression",
+          "refId": "B",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    85
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "C"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "B",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "C",
+            "type": "threshold"
+          },
+          "queryType": "expression",
+          "refId": "C",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "5m",
+      "id": 2,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "category": "performance",
+        "severity": "medium",
+        "triage": "enabled"
+      },
+      "noDataState": "NoData",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "High CPU - Sistemas y Devs",
+      "uid": "fg3v4dhputkowa",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "condition": "C",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "editorMode": "code",
+            "expr": "100 * (\r\n  1 -\r\n  node_memory_MemAvailable_bytes{\r\n    job=~\"inventario-Sistemas|inventario-Devs|node-exporter-local\"\r\n  }\r\n  /\r\n  node_memory_MemTotal_bytes{\r\n    job=~\"inventario-Sistemas|inventario-Devs|node-exporter-local\"\r\n  }\r\n)",
+            "instant": true,
+            "intervalMs": 1000,
+            "legendFormat": "__auto",
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    90
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "C"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "C",
+            "type": "threshold"
+          },
+          "queryType": "expression",
+          "refId": "C",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "5m",
+      "id": 3,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "category": "memory",
+        "severity": "high",
+        "triage": "enabled"
+      },
+      "noDataState": "NoData",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "High Memory - Sistemas y Devs",
+      "uid": "fg3v4l65vrzlsd",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "condition": "C",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "editorMode": "code",
+            "expr": "100 * (\r\n  1 -\r\n  node_filesystem_avail_bytes{\r\n    job=~\"inventario-Sistemas|inventario-Devs|node-exporter-local\",\r\n    mountpoint=\"/\",\r\n    fstype!~\"tmpfs|overlay|squashfs\"\r\n  }\r\n  /\r\n  node_filesystem_size_bytes{\r\n    job=~\"inventario-Sistemas|inventario-Devs|node-exporter-local\",\r\n    mountpoint=\"/\",\r\n    fstype!~\"tmpfs|overlay|squashfs\"\r\n  }\r\n)",
+            "instant": true,
+            "intervalMs": 1000,
+            "legendFormat": "__auto",
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    90
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "C"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "C",
+            "type": "threshold"
+          },
+          "queryType": "expression",
+          "refId": "C",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "5m",
+      "id": 4,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "category": "storage",
+        "severity": "high",
+        "triage": "enabled"
+      },
+      "noDataState": "NoData",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "High Disk Usage - Sistemas y Devs",
+      "uid": "fg3v4nk371atcd",
+      "updated": "2026-11-12T15:27:05Z"
+    },
+    {
+      "annotations": {
+        "description": "Evento de demostración generado desde Grafana para verificar\nel análisis con Gemini y el envío de correo y Telegram.\nNo representa un incidente real de seguridad.",
+        "summary": "Prueba controlada de notificaciones del Security Triage Bot"
+      },
+      "condition": "C",
+      "data": [
+        {
+          "datasourceUid": "prometheus",
+          "model": {
+            "editorMode": "code",
+            "expr": "vector(1)",
+            "instant": true,
+            "intervalMs": 1000,
+            "legendFormat": "__auto",
+            "maxDataPoints": 43200,
+            "range": false,
+            "refId": "A"
+          },
+          "queryType": "",
+          "refId": "A",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          }
+        },
+        {
+          "datasourceUid": "__expr__",
+          "model": {
+            "conditions": [
+              {
+                "evaluator": {
+                  "params": [
+                    1
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": [
+                    "C"
+                  ]
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
+                "type": "query"
+              }
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "C",
+            "type": "threshold"
+          },
+          "queryType": "expression",
+          "refId": "C",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          }
+        }
+      ],
+      "execErrState": "Error",
+      "folderUID": "bg3s5j2ylm1vka",
+      "for": "1m",
+      "id": 5,
+      "isPaused": false,
+      "keep_firing_for": "0s",
+      "labels": {
+        "category": "demo",
+        "environment": "lab",
+        "severity": "high",
+        "triage": "enabled"
+      },
+      "noDataState": "NoData",
+      "notification_settings": null,
+      "orgID": 1,
+      "record": null,
+      "ruleGroup": "Infrastructure",
+      "title": "LAB - Prueba de notificaciones IA",
+      "uid": "ag3v526avhipsb",
+      "updated": "2026-11-12T15:27:05Z"
+    }
+  ],
+  "contact_points": [
+    {
+      "name": "Infraestructura - Emergencias",
+      "secure_fields": [],
+      "settings_keys": [
+        "bottoken",
+        "chatid",
+        "disable_notifications",
+        "disable_web_page_preview",
+        "message",
+        "parse_mode",
+        "protect_content"
+      ],
+      "type": "telegram",
+      "uid": "ag42sb1ootptsb"
+    },
+    {
+      "name": "Infraestructura - Emergencias",
+      "secure_fields": [],
+      "settings_keys": [
+        "addresses",
+        "message",
+        "singleEmail",
+        "subject"
+      ],
+      "type": "email",
+      "uid": "cg42tyj7sgdfka"
+    },
+    {
+      "name": "Security Triage Bot",
+      "secure_fields": [],
+      "settings_keys": [
+        "authorization_credentials",
+        "authorization_scheme",
+        "httpMethod",
+        "maxAlerts",
+        "url"
+      ],
+      "type": "webhook",
+      "uid": "fg3s4kqn7t7uob"
+    }
+  ],
+  "policies": {
+    "group_by": [
+      "grafana_folder",
+      "alertname"
+    ],
+    "receiver": "empty",
+    "routes": [
+      {
+        "object_matchers": [
+          [
+            "triage",
+            "=",
+            "enabled"
+          ]
+        ],
+        "receiver": "Security Triage Bot"
+      }
+    ]
+  },
+  "source_backup": "alerting-20261112T153119Z-c358f34d1aa4.json"
+}

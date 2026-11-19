@@ -1,0 +1,8 @@
+services:
+  prometheus:
+    networks:
+      triage_metrics: {}
+networks:
+  triage_metrics:
+    external: true
+    name: triage-metrics-private

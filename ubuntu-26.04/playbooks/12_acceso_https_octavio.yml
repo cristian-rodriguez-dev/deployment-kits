@@ -1,0 +1,120 @@
+---
+- name: 12 | Accesos HTTPS con Traefik integrado K3s
+  hosts: k3s-servers
+  become: true
+  gather_facts: false
+  vars:
+    tls_cert: "{{ var_octavio_tls_cert_path }}"
+    tls_key: "{{ var_octavio_tls_key_path }}"
+    passwd_file: "{{ var_octavio_prometheus_htpasswd_path }}"
+    manifest: /root/dk-octavio-ingress.yml
+  tasks:
+    - name: Validar dirección privada y rutas TLS
+      ansible.builtin.assert:
+        that:
+          - var_observability_access_ip | length > 6
+          - var_observability_access_ip not in ['127.0.0.1', '0.0.0.0']
+          - tls_cert | length > 4
+          - tls_key | length > 4
+          - passwd_file | length > 4
+        fail_msg: 'Configura IP real del servidor, TLS y htpasswd externos a Git'
+    - name: Comprobar certificados en servidor
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: ["{{ tls_cert }}", "{{ tls_key }}", "{{ passwd_file }}"]
+      register: tls_files
+      no_log: true
+    - name: Rechazar certificados o autenticación ausentes
+      ansible.builtin.assert:
+        that: tls_files.results | selectattr('stat.isreg') | list | length == 3
+      no_log: true
+    - name: Validar wildcard o nombres en certificado
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, "{{ tls_cert }}", -noout, -checkhost, "{{ item }}"]
+      loop:
+        - awx.octavio.internal
+        - grafana.octavio.internal
+        - wazuh.octavio.internal
+        - prometheus.octavio.internal
+      changed_when: false
+      no_log: true
+    - name: Confirmar Traefik K3s listo
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, kube-system, rollout, status, deployment/traefik, --timeout=300s]
+      changed_when: false
+    - name: Crear namespace para rutas y endpoints
+      ansible.builtin.command:
+        argv: [k3s, kubectl, create, namespace, monitoring, --dry-run=client, -o, yaml]
+      register: namespace_def
+      changed_when: false
+    - name: Aplicar namespace
+      ansible.builtin.command:
+        argv: [k3s, kubectl, apply, -f, -]
+        stdin: "{{ namespace_def.stdout }}"
+      register: apply_namespace
+      changed_when: "'created' in apply_namespace.stdout or 'configured' in apply_namespace.stdout"
+    - name: Instalar secretos TLS en AWX y monitorización
+      ansible.builtin.shell: |
+        k3s kubectl -n {{ item }} create secret tls dk-octavio-internal-tls \
+          --cert={{ tls_cert | quote }} --key={{ tls_key | quote }} \
+          --dry-run=client -o yaml | k3s kubectl -n {{ item }} apply -f -
+      args:
+        executable: /bin/bash
+      loop: [awx, monitoring]
+      register: tls_result
+      changed_when: "'created' in tls_result.stdout or 'configured' in tls_result.stdout"
+      no_log: true
+    - name: Instalar autenticación básica para Prometheus
+      ansible.builtin.shell: |
+        k3s kubectl -n monitoring create secret generic dk-prometheus-users \
+          --from-file=users={{ passwd_file | quote }} \
+          --dry-run=client -o yaml | k3s kubectl -n monitoring apply -f -
+      args:
+        executable: /bin/bash
+      register: auth_result
+      changed_when: "'created' in auth_result.stdout or 'configured' in auth_result.stdout"
+      no_log: true
+    - name: Generar rutas Traefik a los servicios existentes
+      ansible.builtin.template:
+        src: ../templates/integration/ingress-octavio.yml.j2
+        dest: "{{ manifest }}"
+        mode: '0600'
+    - name: Aplicar rutas existentes
+      ansible.builtin.command:
+        argv: [k3s, kubectl, apply, -f, "{{ manifest }}"]
+      register: routes_result
+      changed_when: "'created' in routes_result.stdout or 'configured' in routes_result.stdout"
+    - name: Comprobar rutas publicadas
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, monitoring, get, ingressroute, dk-grafana, dk-wazuh, dk-prometheus]
+      changed_when: false
+
+    - name: Comprobar enrutamiento HTTPS desde el propio host
+      ansible.builtin.command:
+        argv:
+          - curl
+          - -k
+          - -sS
+          - -o
+          - /dev/null
+          - -w
+          - '%{http_code}'
+          - --max-time
+          - '15'
+          - --resolve
+          - '{{ item.host }}:443:{{ var_observability_access_ip }}'
+          - 'https://{{ item.host }}/'
+      loop:
+        - host: awx.octavio.internal
+          expected: ['200', '302', '303']
+        - host: grafana.octavio.internal
+          expected: ['200', '302', '303']
+        - host: wazuh.octavio.internal
+          expected: ['200', '302', '303']
+        - host: prometheus.octavio.internal
+          expected: ['401']
+      register: https_probe
+      changed_when: false
+      until: https_probe.stdout in item.expected
+      retries: 10
+      delay: 6

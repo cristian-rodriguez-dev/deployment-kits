@@ -1,0 +1,7 @@
+{
+  "source": "wazuh",
+  "title": "SSH brute force - LAB",
+  "severity": "high",
+  "description": "Evento sintético: regla 5763, 10 fallos SSH en 120 segundos. No se confirma bloqueo.",
+  "synthetic": true
+}

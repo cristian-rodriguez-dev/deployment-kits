@@ -1,0 +1,28 @@
+services:
+  grafana:
+    image: {{ var_grafana_image | to_json }}
+    user: "472:472"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - {{ (ubuntu26_grafana_bind ~ ':' ~ (var_grafana_port | string) ~ ':3000') | to_json }}
+    environment:
+      GF_SERVER_ROOT_URL: https://grafana.octavio.internal/
+      GF_PLUGINS_PREINSTALL: grafana-opensearch-datasource
+      GF_SECURITY_ADMIN_USER: {{ var_grafana_admin_user | to_json }}
+      GF_SECURITY_ADMIN_EMAIL: {{ var_grafana_admin_email | to_json }}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - {{ (var_grafana_install_dir ~ '/data:/var/lib/grafana') | to_json }}
+      - {{ (var_grafana_install_dir ~ '/provisioning:/etc/grafana/provisioning:ro') | to_json }}
+      - {{ (var_grafana_install_dir ~ '/secrets/admin_password:/run/secrets/admin_password:ro') | to_json }}
+    networks:
+      - metricas
+
+networks:
+  metricas:
+    name: {{ var_monitorizacion_network | to_json }}
+    external: true

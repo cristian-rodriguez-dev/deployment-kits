@@ -1,0 +1,27 @@
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: kube-state-metrics
+  namespace: kube-system
+spec:
+  repo: https://prometheus-community.github.io/helm-charts
+  chart: kube-state-metrics
+  version: {{ var_ubuntu26_ksm_chart_version | to_json }}
+  targetNamespace: monitoring
+  createNamespace: true
+  failurePolicy: abort
+  valuesContent: |-
+    service:
+      type: ClusterIP
+      port: 8080
+    prometheus:
+      monitor:
+        enabled: false
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi

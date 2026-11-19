@@ -1,0 +1,61 @@
+---
+- name: 09D | Kubelet cAdvisor del host K3s
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+  vars:
+    credentials_dir: "{{ var_prometheus_install_dir }}/prometheus/k3s-credentials"
+    var_k3s_node_name: "{{ var_ubuntu26_k3s_node_name }}"
+    kubelet_scrape: |
+      - job_name: kubelet-cadvisor
+        scheme: https
+        metrics_path: /api/v1/nodes/{{ var_k3s_node_name }}/proxy/metrics/cadvisor
+        authorization:
+          type: Bearer
+          credentials_file: /etc/prometheus/k3s-credentials/kubelet.token
+        tls_config:
+          ca_file: /etc/prometheus/k3s-credentials/ca.crt
+        static_configs:
+          - targets: ["{{ var_ubuntu26_k3s_private_ip }}:6443"]
+            labels:
+              cluster: "{{ var_ubuntu26_cluster_name }}"
+              departamento: "{{ var_prometheus_local_department }}"
+  tasks:
+    - name: Generar política mínima para el nodo propio
+      ansible.builtin.template:
+        src: ../templates/integration/k3s-kubelet-rbac.yml.j2
+        dest: /root/dk-kubelet-rbac.yml
+        mode: '0600'
+    - name: Aplicar permisos Kubelet
+      ansible.builtin.command:
+        argv: [k3s, kubectl, apply, -f, /root/dk-kubelet-rbac.yml]
+      register: kubelet_rbac
+      changed_when: "'created' in kubelet_rbac.stdout or 'configured' in kubelet_rbac.stdout"
+    - name: Leer token de cAdvisor
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, monitoring, get, secret, dk-cadvisor-reader-token, '-o=jsonpath={.data.token}']
+      register: kubelet_token
+      changed_when: false
+      no_log: true
+      retries: 30
+      delay: 5
+      until: kubelet_token.rc == 0 and kubelet_token.stdout | length > 20
+    - name: Guardar credencial restringida
+      ansible.builtin.copy:
+        dest: "{{ credentials_dir }}/kubelet.token"
+        content: "{{ kubelet_token.stdout | b64decode }}"
+        owner: root
+        group: '65534'
+        mode: '0640'
+      no_log: true
+      diff: false
+    - name: Configurar scrape cAdvisor
+      ansible.builtin.copy:
+        dest: "{{ var_prometheus_install_dir }}/prometheus/scrape.d/kubelet-cadvisor.yml"
+        content: "{{ kubelet_scrape }}"
+        mode: '0644'
+      notify: Recargar Prometheus
+  handlers:
+    - name: Recargar Prometheus
+      ansible.builtin.shell: docker ps -q --filter 'label=com.docker.compose.project={{ var_prometheus_project_name }}' --filter 'label=com.docker.compose.service=prometheus' | xargs -r docker kill --signal=HUP
+      changed_when: true

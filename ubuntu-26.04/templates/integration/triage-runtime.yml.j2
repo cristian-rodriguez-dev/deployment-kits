@@ -1,0 +1,19 @@
+services:
+  triage-bot:
+    networks:
+      triage-webhooks: {}
+      wazuh_default: {}
+      metricas: {}
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      LOKI_URL: http://{{ triage_loki_ip.stdout }}
+networks:
+  triage-webhooks:
+    external: true
+    name: triage-webhooks
+  wazuh_default:
+    external: true
+    name: {{ (var_wazuh_project_name ~ '_default') | to_json }}
+  metricas:
+    external: true
+    name: {{ var_monitorizacion_network | to_json }}

@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dk-cadvisor-reader
+  namespace: monitoring
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dk-cadvisor-reader-token
+  namespace: monitoring
+  annotations:
+    kubernetes.io/service-account.name: dk-cadvisor-reader
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dk-cadvisor-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    resourceNames: [{{ var_k3s_node_name | to_json }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dk-cadvisor-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dk-cadvisor-reader
+subjects:
+  - kind: ServiceAccount
+    name: dk-cadvisor-reader
+    namespace: monitoring

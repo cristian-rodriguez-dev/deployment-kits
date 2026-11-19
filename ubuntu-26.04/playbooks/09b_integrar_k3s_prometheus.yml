@@ -1,0 +1,77 @@
+---
+- name: 09B | KSM en Prometheus
+  hosts: prometheus-servers
+  become: true
+  gather_facts: false
+  vars:
+    k3s_host: '{{ groups[''k3s-servers''] | first }}'
+    k3s_address: '{{ hostvars[k3s_host].var_ubuntu26_k3s_private_ip | default(hostvars[k3s_host].ansible_host | default(k3s_host))
+      }}'
+    credentials_dir: '{{ var_prometheus_install_dir }}/prometheus/k3s-credentials'
+    prometheus_file: '{{ var_prometheus_install_dir }}/prometheus/prometheus.yml'
+    prometheus_bind: '{{ var_prometheus_bind_address | default(''127.0.0.1'') }}'
+    ksm_block: "  - job_name: k3s-kube-state-metrics\n    scheme: https\n    metrics_path: /api/v1/namespaces/monitoring/services/http:kube-state-metrics:8080/proxy/metrics\n\
+      \    authorization:\n      type: Bearer\n      credentials_file: /etc/prometheus/k3s-credentials/token\n    tls_config:\n\
+      \      ca_file: /etc/prometheus/k3s-credentials/ca.crt\n    static_configs:\n      - targets: [\"{{ k3s_address }}:6443\"\
+      ]\n        labels:\n          cluster: \"{{ hostvars[k3s_host].var_ubuntu26_cluster_name | default('observabilidad') }}\"\
+      \n"
+  tasks:
+  - name: Leer CA K3s
+    ansible.builtin.slurp:
+      src: /var/lib/rancher/k3s/server/tls/server-ca.crt
+    delegate_to: '{{ k3s_host }}'
+    register: k3s_ca
+    no_log: true
+  - name: Leer token de solo lectura K3s
+    ansible.builtin.command:
+      argv:
+      - k3s
+      - kubectl
+      - -n
+      - monitoring
+      - get
+      - secret
+      - dk-observability-reader-token
+      - -o=jsonpath={.data.token}
+    delegate_to: '{{ k3s_host }}'
+    register: k3s_token
+    changed_when: false
+    no_log: true
+    until: (k3s_token.rc == 0) and (k3s_token.stdout | length > 20)
+    retries: 12
+    delay: 5
+  - name: Crear directorio de credenciales de Prometheus
+    ansible.builtin.file:
+      path: '{{ credentials_dir }}'
+      state: directory
+      owner: root
+      group: '65534'
+      mode: '0750'
+  - name: Guardar CA K3s
+    ansible.builtin.copy:
+      dest: '{{ credentials_dir }}/ca.crt'
+      content: '{{ k3s_ca.content | b64decode }}'
+      owner: root
+      group: '65534'
+      mode: '0640'
+    no_log: true
+  - name: Guardar token de lectura K3s
+    ansible.builtin.copy:
+      dest: '{{ credentials_dir }}/token'
+      content: '{{ k3s_token.stdout | b64decode }}'
+      owner: root
+      group: '65534'
+      mode: '0640'
+    no_log: true
+    diff: false
+  - name: Configurar scrape KSM separado del Prometheus central
+    notify: Recargar Prometheus
+    ansible.builtin.copy:
+      dest: '{{ var_prometheus_install_dir }}/prometheus/scrape.d/k3s-ksm.yml'
+      content: '{{ ksm_block }}'
+      mode: '0644'
+  handlers:
+  - name: Recargar Prometheus
+    ansible.builtin.shell: docker ps -q --filter 'label=com.docker.compose.project={{ var_prometheus_project_name }}' --filter
+      'label=com.docker.compose.service=prometheus' | xargs -r docker kill --signal=HUP
+    changed_when: true

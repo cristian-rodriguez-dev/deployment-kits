@@ -1,0 +1,99 @@
+---
+- name: 04 | Prometheus y Node Exporter local
+  hosts: prometheus-servers
+  gather_facts: false
+  become: true
+  vars:
+    ubuntu26_prometheus_bind: '{{ var_prometheus_bind_address | default(''127.0.0.1'') }}'
+    ubuntu26_prometheus_compose: '{{ var_prometheus_install_dir }}/docker-compose.yml'
+    ubuntu26_prometheus_config: '{{ var_prometheus_install_dir }}/prometheus/prometheus.yml'
+    ubuntu26_prometheus_targets: '{{ var_prometheus_install_dir }}/prometheus/targets/node-exporters.yml'
+  tasks:
+  - name: Comprobar red compartida Docker
+    ansible.builtin.command:
+      argv:
+      - docker
+      - network
+      - inspect
+      - '{{ var_monitorizacion_network }}'
+    register: monitoring_network
+    changed_when: false
+    failed_when: false
+  - name: Crear red para Prometheus y Grafana
+    ansible.builtin.command:
+      argv:
+      - docker
+      - network
+      - create
+      - '{{ var_monitorizacion_network }}'
+    when: monitoring_network.rc != 0
+  - name: Crear directorios Prometheus
+    ansible.builtin.file:
+      path: '{{ item.path }}'
+      state: directory
+      owner: '{{ item.owner }}'
+      group: '{{ item.group }}'
+      mode: '0755'
+    loop:
+    - path: '{{ var_prometheus_install_dir }}/prometheus/targets'
+      owner: root
+      group: root
+    - path: '{{ var_prometheus_install_dir }}/data'
+      owner: '65534'
+      group: '65534'
+    - path: '{{ var_prometheus_install_dir }}/prometheus/scrape.d'
+      owner: root
+      group: root
+  - name: Crear archivo inicial de scrapes externos
+    ansible.builtin.copy:
+      dest: '{{ var_prometheus_install_dir }}/prometheus/scrape.d/empty.yml'
+      content: '[]
+
+        '
+      force: false
+      mode: '0644'
+  - name: Inicializar targets vacíos si no existen
+    ansible.builtin.copy:
+      dest: '{{ ubuntu26_prometheus_targets }}'
+      content: '[]
+
+        '
+      force: false
+      mode: '0644'
+  - name: Escribir configuración Prometheus
+    ansible.builtin.template:
+      src: ../templates/prometheus/prometheus.yml.j2
+      dest: '{{ ubuntu26_prometheus_config }}'
+      mode: '0644'
+    notify: Reiniciar Prometheus cuando cambie su configuración
+  - name: Escribir Docker Compose Prometheus
+    ansible.builtin.template:
+      src: ../templates/prometheus/docker-compose.yml.j2
+      dest: '{{ ubuntu26_prometheus_compose }}'
+      mode: '0644'
+  - name: Detectar overlay persistente de métricas del bot
+    ansible.builtin.stat:
+      path: "{{ var_prometheus_install_dir }}/compose.triage-metrics.yml"
+    register: triage_prometheus_compose_stat
+  - name: Arrancar Prometheus y Node Exporter
+    community.docker.docker_compose_v2:
+      project_src: '{{ var_prometheus_install_dir }}'
+      project_name: '{{ var_prometheus_project_name }}'
+      files: "{{ ['docker-compose.yml'] + (['compose.triage-metrics.yml'] if triage_prometheus_compose_stat.stat.exists else []) }}"
+      state: present
+      pull: missing
+      recreate: auto
+  - name: Esperar Prometheus
+    ansible.builtin.uri:
+      url: http://{{ ubuntu26_prometheus_bind }}:{{ var_prometheus_port }}/-/ready
+      status_code: 200
+    register: prom_ready
+    until: prom_ready.status | default(0) == 200
+    retries: 30
+    delay: 5
+    changed_when: false
+  handlers:
+  - name: Reiniciar Prometheus cuando cambie su configuración
+    ansible.builtin.shell: docker ps -q --filter 'label=com.docker.compose.project={{ var_prometheus_project_name }}' --filter
+      'label=com.docker.compose.service=prometheus' | xargs -r docker kill --signal=HUP
+    changed_when: true

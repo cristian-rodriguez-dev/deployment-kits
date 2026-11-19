@@ -1,0 +1,59 @@
+- name: 03 | Tema y zona horaria Wazuh
+  hosts: wazuh-servers
+  gather_facts: false
+  become: true
+  vars:
+    var_wazuh_stack_dir: '{{ var_wazuh_install_dir }}/single-node'
+    var_wazuh_dashboard_config: '{{ var_wazuh_stack_dir }}/config/wazuh_dashboard/opensearch_dashboards.yml'
+  tasks:
+  - name: Configurar tema y zona horaria
+    ansible.builtin.lineinfile:
+      path: '{{ var_wazuh_dashboard_config }}'
+      regexp: '{{ var_wazuh_setting.regexp }}'
+      line: '{{ var_wazuh_setting.line }}'
+      state: present
+      backup: true
+    loop:
+    - regexp: '^\s*uiSettings\.overrides\.theme:darkMode:'
+      line: 'uiSettings.overrides.theme:darkMode: {{ var_wazuh_dashboard_dark_mode | ternary(''true'', ''false'') }}'
+    - regexp: '^\s*uiSettings\.overrides\.dateFormat:tz:'
+      line: 'uiSettings.overrides.dateFormat:tz: {{ var_wazuh_dashboard_timezone | to_json }}'
+    loop_control:
+      loop_var: var_wazuh_setting
+      label: '{{ var_wazuh_setting.line }}'
+    notify: Recrear Wazuh Dashboard
+  - name: Aplicar los cambios pendientes
+    ansible.builtin.meta: flush_handlers
+  - name: Esperar a que el Dashboard responda
+    ansible.builtin.uri:
+      url: https://127.0.0.1:{{ var_wazuh_dashboard_port }}/
+      validate_certs: false
+      follow_redirects: none
+      status_code:
+      - 200
+      - 302
+    register: var_wazuh_dashboard_check
+    until: (var_wazuh_dashboard_check.status | default(0)) in [200, 302]
+    retries: 60
+    delay: 10
+  - name: Mostrar resultado
+    ansible.builtin.debug:
+      msg:
+      - Configuración de Wazuh Dashboard aplicada.
+      - 'Zona horaria: {{ var_wazuh_dashboard_timezone }}'
+      - 'Modo oscuro: {{ var_wazuh_dashboard_dark_mode }}'
+  handlers:
+  - name: Recrear Wazuh Dashboard
+    community.docker.docker_compose_v2:
+      project_src: '{{ var_wazuh_stack_dir }}'
+      project_name: '{{ var_wazuh_project_name }}'
+      files:
+      - docker-compose.yml
+      - compose.credentials.yml
+      services:
+      - wazuh.dashboard
+      dependencies: false
+      state: present
+      recreate: always
+      pull: missing
+    no_log: true

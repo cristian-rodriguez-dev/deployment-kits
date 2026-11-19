@@ -1,0 +1,229 @@
+{
+  "schema_version": "triage-multiaxis-challenges-v1",
+  "provenance": "synthetic_proposals_not_gemini_outputs",
+  "challenges": [
+    {
+      "id": "critical-suppress",
+      "case_id": "critical-model-tries-suppress",
+      "proposal": {
+        "notification": "suppress",
+        "investigation": "required",
+        "evidence_state": "suspicious_unconfirmed",
+        "confidence": "medium",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "investigation_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "evidence_state_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      }
+    },
+    {
+      "id": "critical-ignores-investigation",
+      "case_id": "critical-model-tries-suppress",
+      "proposal": {
+        "notification": "notify",
+        "investigation": "not_required",
+        "evidence_state": "suspicious_unconfirmed",
+        "confidence": "medium",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "investigation_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "evidence_state_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      }
+    },
+    {
+      "id": "loki-unsupported-benign",
+      "case_id": "verified-loki-volume-not-login",
+      "proposal": {
+        "notification": "hold",
+        "investigation": "not_required",
+        "evidence_state": "benign_supported",
+        "confidence": "high",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "cross.loki_ssh_service_log_volume_increase"
+        ],
+        "investigation_evidence_ids": [
+          "cross.loki_ssh_service_log_volume_increase"
+        ],
+        "evidence_state_evidence_ids": [
+          "cross.loki_ssh_service_log_volume_increase"
+        ]
+      }
+    },
+    {
+      "id": "medium-high-confidence-only-wazuh",
+      "case_id": "medium-uncertain-review",
+      "proposal": {
+        "notification": "hold",
+        "investigation": "required",
+        "evidence_state": "suspicious_unconfirmed",
+        "confidence": "high",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "investigation_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "evidence_state_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      }
+    },
+    {
+      "id": "wazuh-evolution-coherent",
+      "case_id": "wazuh-sequence-and-group-growth",
+      "proposal": {
+        "notification": "notify",
+        "investigation": "required",
+        "evidence_state": "suspicious_unconfirmed",
+        "confidence": "medium",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "group.later_higher_rule_level",
+          "wazuh.rule_level"
+        ],
+        "investigation_evidence_ids": [
+          "group.later_higher_rule_level",
+          "wazuh.rule_level"
+        ],
+        "evidence_state_evidence_ids": [
+          "group.later_higher_rule_level",
+          "wazuh.rule_level"
+        ]
+      }
+    },
+    {
+      "id": "invented-loki-citation",
+      "case_id": "invented-loki-citation",
+      "proposal": {
+        "notification": "hold",
+        "investigation": "required",
+        "evidence_state": "suspicious_unconfirmed",
+        "confidence": "medium",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "cross.loki_ssh_service_log_volume_increase"
+        ],
+        "investigation_evidence_ids": [
+          "cross.loki_ssh_service_log_volume_increase"
+        ],
+        "evidence_state_evidence_ids": [
+          "cross.loki_ssh_service_log_volume_increase"
+        ]
+      }
+    },
+    {
+      "id": "unverified-agent-claim",
+      "case_id": "unverified-agent-must-fail-closed",
+      "proposal": {
+        "notification": "notify",
+        "investigation": "required",
+        "evidence_state": "suspicious_unconfirmed",
+        "confidence": "medium",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "investigation_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "evidence_state_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      }
+    },
+    {
+      "id": "synthetic-notification",
+      "case_id": "synthetic-critical-never-notify",
+      "proposal": {
+        "notification": "notify",
+        "investigation": "required",
+        "evidence_state": "suspicious_unconfirmed",
+        "confidence": "medium",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "investigation_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "evidence_state_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      }
+    },
+    {
+      "id": "prometheus-scrape-with-review",
+      "case_id": "verified-prometheus-citation",
+      "proposal": {
+        "notification": "hold",
+        "investigation": "required",
+        "evidence_state": "suspicious_unconfirmed",
+        "confidence": "medium",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "cross.prometheus_scrape_unavailable"
+        ],
+        "investigation_evidence_ids": [
+          "cross.prometheus_scrape_unavailable"
+        ],
+        "evidence_state_evidence_ids": [
+          "cross.prometheus_scrape_unavailable"
+        ]
+      }
+    },
+    {
+      "id": "low-benign-not-proven",
+      "case_id": "low-reported-benign",
+      "proposal": {
+        "notification": "suppress",
+        "investigation": "not_required",
+        "evidence_state": "benign_supported",
+        "confidence": "medium",
+        "notification_reason": "Propuesta sintetica para ensayar reglas; requiere revision humana",
+        "investigation_reason": "No se afirma intrusion ni causalidad a partir de la senal",
+        "evidence_reason": "Solo se conocen las observaciones citadas; faltan otras pruebas",
+        "notification_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "investigation_evidence_ids": [
+          "wazuh.rule_level"
+        ],
+        "evidence_state_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      }
+    }
+  ]
+}

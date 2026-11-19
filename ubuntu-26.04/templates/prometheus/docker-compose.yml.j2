@@ -1,0 +1,59 @@
+services:
+  prometheus:
+    image: {{ var_prometheus_image | to_json }}
+    user: "65534:65534"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "{{ ubuntu26_prometheus_bind }}:{{ var_prometheus_port }}:9090"
+    volumes:
+      - {{ (var_prometheus_install_dir ~ '/prometheus:/etc/prometheus:ro') | to_json }}
+      - {{ (var_prometheus_install_dir ~ '/data:/prometheus') | to_json }}
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time={{ var_prometheus_retention }}"
+    networks:
+      metricas:
+        aliases:
+          - prometheus
+    depends_on:
+      - node-exporter
+      - cadvisor
+
+  node-exporter:
+    image: {{ var_node_exporter_image | to_json }}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
+    command:
+      - "--path.rootfs=/host"
+      - "--web.listen-address=:{{ var_node_exporter_port }}"
+    networks:
+      - metricas
+
+  cadvisor:
+    image: {{ var_cadvisor_image | to_json }}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:ro"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker:/var/lib/docker:ro"
+    command:
+      - "--docker_only=true"
+    networks:
+      - metricas
+
+networks:
+  metricas:
+    name: {{ var_monitorizacion_network | to_json }}
+    external: true

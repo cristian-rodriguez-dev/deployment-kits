@@ -1,0 +1,52 @@
+apiVersion: 1
+
+datasources:
+  - name: wazuh
+    uid: wazuh
+    type: grafana-opensearch-datasource
+    access: proxy
+    url: https://wazuh.indexer:9200
+    isDefault: false
+    basicAuth: true
+    basicAuthUser: admin
+    jsonData:
+      database: wazuh-alerts-*
+      flavor: opensearch
+      timeField: '@timestamp'
+      tlsAuthWithCACert: true
+      tlsSkipVerify: false
+    secureJsonData:
+      basicAuthPassword: {{ var_wazuh_admin_password | to_json }}
+      tlsCACert: {{ var_wazuh_indexer_ca | to_json }}
+  - name: Wazuh Alerts
+    uid: dg2lbe27nkcn4e
+    type: grafana-opensearch-datasource
+    access: proxy
+    url: https://wazuh.indexer:9200
+    basicAuth: true
+    basicAuthUser: admin
+    jsonData:
+      database: wazuh-alerts-*
+      flavor: opensearch
+      timeField: '@timestamp'
+      tlsAuthWithCACert: true
+      tlsSkipVerify: false
+    secureJsonData:
+      basicAuthPassword: {{ var_wazuh_admin_password | to_json }}
+      tlsCACert: {{ var_wazuh_indexer_ca | to_json }}
+  - name: Wazuh Vulnerabilities
+    uid: dg2ls1gqxzojkc
+    type: grafana-opensearch-datasource
+    access: proxy
+    url: https://wazuh.indexer:9200
+    basicAuth: true
+    basicAuthUser: admin
+    jsonData:
+      database: wazuh-states-vulnerabilities-*
+      flavor: opensearch
+      timeField: '@timestamp'
+      tlsAuthWithCACert: true
+      tlsSkipVerify: false
+    secureJsonData:
+      basicAuthPassword: {{ var_wazuh_admin_password | to_json }}
+      tlsCACert: {{ var_wazuh_indexer_ca | to_json }}

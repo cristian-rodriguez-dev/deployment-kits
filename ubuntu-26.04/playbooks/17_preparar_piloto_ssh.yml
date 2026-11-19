@@ -1,0 +1,128 @@
+- name: 17 | Preparar piloto SSH original en un agente autorizado (no activa bloqueos)
+  hosts: monitoring-agents
+  gather_facts: false
+  become: true
+  serial: 1
+  vars:
+    pilot_dir: /etc/wazuh-ssh-ar
+    pilot_remote_script: /var/ossec/active-response/bin/ssh-block-pilot.py
+    pilot_remote_init: /usr/local/sbin/wazuh-ssh-firewall-init.py
+    pilot_remote_unit: /etc/systemd/system/wazuh-ssh-firewall-init.service
+    pilot_reference_networks:
+    - 127.0.0.0/8
+    - 192.168.56.0/24
+    - ::1/128
+    pilot_networks: '{{ (var_wazuh_ssh_pilot_protected_networks | default(pilot_reference_networks)) + ([var_wazuh_ssh_pilot_admin_cidr] if (var_wazuh_ssh_pilot_admin_cidr | default('''')
+      | length > 0) else []) | unique | list }}'
+    pilot_config:
+      block_seconds: 180
+      chain: WAZUH_SSH_BLOCK
+      enable_ipv6: false
+      excluded_log_sources:
+      - /var/ossec/logs/geoip-lab.log
+      protected_ips: '{{ var_wazuh_ssh_pilot_protected_ips | default([]) }}'
+      protected_networks: '{{ pilot_networks }}'
+      recovery_seconds: 240
+      rules:
+      - '5763'
+      ssh_port: '{{ var_wazuh_ssh_pilot_ssh_port | default(22) }}'
+  tasks:
+  - name: Comprobar autorizacion de preparacion y equipo elegido
+    ansible.builtin.assert:
+      that:
+      - var_wazuh_ssh_pilot_install_authorized | default(false) | bool
+      - var_wazuh_ssh_pilot_target_host | default('') | length > 0
+      - var_wazuh_ssh_pilot_target_host in groups['monitoring-agents']
+      - var_wazuh_ssh_pilot_agent_id | default('') | string is match('^[0-9]{3,}$')
+      fail_msg: El Job 17 requiere autorizacion explicita, host remoto y ID de agente valido; no ejecutarlo en el servidor central
+  - name: Instalar archivos originales solo en el cliente seleccionado
+    when: inventory_hostname == var_wazuh_ssh_pilot_target_host
+    block:
+    - name: Verificar que el agente ya se ha instalado
+      ansible.builtin.stat:
+        path: /var/ossec/etc/client.keys
+      register: pilot_agent_keys
+      no_log: true
+    - name: Exigir agente Wazuh existente
+      ansible.builtin.assert:
+        that:
+        - pilot_agent_keys.stat.exists
+        - pilot_agent_keys.stat.isreg
+        fail_msg: Instala el agente mediante Job 06 antes de preparar Active Response
+    - name: Leer solo el identificador local del agente
+      ansible.builtin.command:
+        argv:
+        - awk
+        - '!/^#/ && NF {print $1}'
+        - /var/ossec/etc/client.keys
+      register: pilot_local_id
+      changed_when: false
+      no_log: true
+    - name: Comprobar que el agente corresponde al autorizado por el manager
+      ansible.builtin.assert:
+        that:
+        - pilot_local_id.stdout_lines | length == 1
+        - pilot_local_id.stdout == (var_wazuh_ssh_pilot_agent_id | string)
+        fail_msg: 'El agente local no coincide con el ID autorizado: no instalar Active Response'
+    - name: Crear el directorio de configuracion
+      ansible.builtin.file:
+        path: '{{ pilot_dir }}'
+        state: directory
+        owner: root
+        group: wazuh
+        mode: '0750'
+    - name: Instalar configuracion del piloto
+      ansible.builtin.copy:
+        dest: '{{ pilot_dir }}/config.json'
+        content: '{{ pilot_config | to_nice_json(indent=2) }}
+
+          '
+        owner: root
+        group: wazuh
+        mode: '0640'
+    - name: Instalar script original de Active Response
+      ansible.builtin.copy:
+        src: ../pilot-ssh/ssh-block-pilot.py
+        dest: '{{ pilot_remote_script }}'
+        owner: root
+        group: wazuh
+        mode: '0750'
+    - name: Instalar inicializador original de firewall
+      ansible.builtin.copy:
+        src: ../pilot-ssh/wazuh-ssh-firewall-init.py
+        dest: '{{ pilot_remote_init }}'
+        owner: root
+        group: root
+        mode: '0750'
+    - name: Instalar unidad systemd sin habilitarla
+      ansible.builtin.copy:
+        src: ../pilot-ssh/wazuh-ssh-firewall-init.service
+        dest: '{{ pilot_remote_unit }}'
+        owner: root
+        group: root
+        mode: '0644'
+      register: pilot_unit
+    - name: Recargar unidades systemd si se ha instalado la unidad
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: pilot_unit.changed
+    - name: Validar sintaxis de los scripts instalados
+      ansible.builtin.command:
+        argv:
+        - /usr/bin/python3
+        - -B
+        - -c
+        - import ast, pathlib; [ast.parse(pathlib.Path(p).read_text()) for p in ['/var/ossec/active-response/bin/ssh-block-pilot.py','/usr/local/sbin/wazuh-ssh-firewall-init.py']]
+      changed_when: false
+    - name: Validar la configuracion local sin modificar el cortafuegos
+      ansible.builtin.command:
+        argv:
+        - /usr/bin/python3
+        - -B
+        - -c
+        - import importlib.util; s=importlib.util.spec_from_file_location('wazuh_pilot','/var/ossec/active-response/bin/ssh-block-pilot.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);
+          m.settings()
+      changed_when: false
+    - name: Informar de la preparacion segura
+      ansible.builtin.debug:
+        msg: Piloto preparado en el agente autorizado; systemd sin habilitar, iptables sin cambios y manager sin modificar

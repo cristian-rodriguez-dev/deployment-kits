@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Security Triage | Centro de incidentes</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#e9eef7;background:#0b101a;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 90% -10%,#19315165,transparent 42%),#0b101a}
+header{border-bottom:1px solid #25344a;background:#101827c7} .wrap{max-width:1320px;margin:auto;padding:24px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}.brand{display:flex;align-items:center;gap:12px}.logo{width:43px;height:43px;border-radius:12px;background:#163b66;display:grid;place-items:center;color:#7fc5ff;font-weight:800;font-size:22px}.brand strong{display:block;font-size:20px;letter-spacing:-.03em}.sub{font-size:12px;color:#9baac0;margin-top:3px}.status{display:flex;align-items:center;gap:8px;color:#a4b3ca;font-size:13px}.dot{width:9px;height:9px;border-radius:50%;background:#ffbd60;display:inline-block}.dot.ok{background:#49d6a7}.dot.bad{background:#ff7b83}
+.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}button,input,select{font:inherit}input,select{background:#141e2e;border:1px solid #31425a;border-radius:9px;color:#e9eef7;padding:10px 12px;outline:0}input:focus,select:focus{border-color:#6ea9e8}input[type=password]{min-width:230px}button{background:#245e9b;color:white;border:1px solid #397ab8;border-radius:9px;padding:10px 14px;cursor:pointer;font-weight:600}button:hover{background:#2c70b7}button:disabled{opacity:.6;cursor:default}.muted{color:#93a5bd}.notice{padding:11px 14px;border:1px solid #32445d;background:#142033;border-radius:9px;margin:18px 0;font-size:13px}.notice.error{border-color:#7e444e;color:#ffb0b8;background:#271a22}
+h1{font-size:26px;margin:26px 0 4px;letter-spacing:-.03em}p.lead{font-size:14px;margin:0 0 24px;color:#9daec4}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.metric{background:#131e2d;border:1px solid #26364e;border-radius:13px;padding:20px}.metric .k{font-size:12px;color:#a5b4c8}.metric .v{font-size:32px;font-weight:750;margin-top:10px;letter-spacing:-.04em}.metric .foot{font-size:12px;color:#91a3b9;margin-top:5px}
+.panel{background:#121b29;border:1px solid #26364e;border-radius:13px;margin-top:22px;overflow:hidden}.panelHead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 20px;border-bottom:1px solid #27374c;flex-wrap:wrap}.panelHead h2{font-size:17px;letter-spacing:-.02em;margin:0}.filters{display:flex;gap:8px;flex-wrap:wrap}.filters select,.filters input{padding:8px 10px;font-size:13px}.filters input{width:200px}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;font-size:13px;min-width:780px}th{color:#90a5bf;font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase}th,td{padding:15px 18px;border-bottom:1px solid #26364e}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.selected{background:#1d2e43}tbody tr:last-child td{border-bottom:0}.date{white-space:nowrap;color:#a5b3c6}.tag{display:inline-block;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;text-transform:uppercase;border:1px solid #52617a;color:#c9d5e3}.tag.high,.tag.critical{color:#ff9aa3;background:#5f263333;border-color:#7e3a4b}.tag.medium{color:#ffce85;background:#583f2038;border-color:#8a623b}.tag.low{color:#73d9b2;background:#174c3a4d;border-color:#2b8061}.tag.gemini{color:#a7b9ff;border-color:#465394;background:#252e543d}.small{font-size:11px;color:#94a6bd;margin-top:5px}.truncate{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.detail{padding:24px}.detailTop{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}.detail h3{font-size:20px;line-height:1.4;margin:0 0 14px}.detail h4{font-size:11px;letter-spacing:.09em;color:#8fa6c3;text-transform:uppercase;margin:23px 0 9px}.detail p{font-size:14px;line-height:1.7;color:#d5deeb;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.detail ul{padding-left:20px;font-size:14px;line-height:1.8;color:#d5deeb;margin:0}.empty{padding:30px;color:#9bafc6;font-size:14px}.footer{font-size:12px;color:#7589a3;padding:24px 0 10px}.hint{color:#83bce9}
+
+/* Bloque 6: correlation is an observation, never a proof of compromise. */
+.tag.patterns{color:#e4b5ff;border-color:#70518a;background:#4a28584d}
+.tag.no_signals{color:#95d6bd;border-color:#366d59;background:#153b3040}
+.tag.insufficient_data,.tag.unavailable,.tag.not_recorded,.tag.invalid{color:#b9c5d5;border-color:#56657b}
+.correlation-note{margin-top:12px!important;font-size:13px!important;color:#a8bad0!important}
+.correlation-sources{display:flex;gap:8px;flex-wrap:wrap;margin:9px 0 12px}
+.correlation-signal{border:1px solid #30435c;background:#152339;border-radius:9px;padding:12px 14px;margin:10px 0}
+.correlation-signal strong{display:block;font-size:13px;margin-bottom:4px;color:#e9eef7}
+.correlation-signal .small{font-size:12px;line-height:1.55}
+.temporal-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.temporal-item{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#101f32;border:1px solid #324863;border-left:3px solid #70a7df;border-radius:8px;padding:10px 12px;font-size:13px}
+.temporal-item span{font-size:12px;color:#adc0d7}
+
+
+
+/* Block 9: informative evolution only, never an operational escalation. */
+.tag.rise{color:#ffceb0;border-color:#9f6b4d;background:#532d244b}
+.tag.new_rules{color:#b9e5f1;border-color:#57899c;background:#1a36454b}
+
+/* Block 8: ephemeral investigation groups. */
+.tag.grouped{color:#b9c9ff;border-color:#6375ac;background:#2e3d634d}
+.group-list{padding:12px 20px 20px;display:flex;gap:12px;flex-wrap:wrap}
+.group-card{flex:1 1 290px;min-width:240px;border:1px solid #385273;background:#17263b;border-radius:10px;padding:14px;cursor:pointer;outline-offset:3px}
+.group-card:hover,.group-card:focus{border-color:#85b4ed;background:#213651}
+.group-card strong{font-size:13px;margin-right:9px}
+
+@media(max-width:880px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:16px}.filters input{width:160px}}
+@media(max-width:480px){.metrics{grid-template-columns:1fr 1fr;gap:9px}.metric{padding:13px}.metric .v{font-size:24px}.brand strong{font-size:17px}input[type=password]{min-width:170px;width:100%}}
+</style>
+</head>
+<body>
+<header><div class="wrap top"><div class="brand"><div class="logo">◈</div><div><strong>Security Triage</strong><div class="sub">Centro de incidentes · Wazuh / Prometheus / Loki / Gemini</div></div></div><div class="status"><span id="dot" class="dot"></span><span id="connection">Sin conectar</span></div></div></header>
+<main class="wrap">
+<div class="top"><div><h1>Incidentes de seguridad</h1><p class="lead">Análisis y recomendaciones; no ejecuta acciones de respuesta automáticamente.</p></div><div class="toolbar"><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Token del webhook" aria-label="Token del webhook"><button id="connect">Conectar</button><button id="refresh" disabled>Actualizar</button><button id="disconnect" disabled>Salir</button></div></div>
+<div id="notice" class="notice">Introduce el <strong>WEBHOOK_TOKEN</strong> para consultar los incidentes. El token solo se mantiene en la memoria de esta pestaña; no se guarda en el navegador.</div>
+<div class="metrics"><div class="metric"><div class="k">Incidentes mostrados</div><div id="total" class="v">—</div><div class="foot">Últimos 50 como máximo</div></div><div class="metric"><div class="k">Prioridad alta o crítica</div><div id="high" class="v">—</div><div class="foot">Según análisis registrado</div></div><div class="metric"><div class="k">Analizados con Gemini</div><div id="ai" class="v">—</div><div class="foot">Modo de análisis: gemini</div></div><div class="metric"><div class="k">Eventos Wazuh</div><div id="wazuh" class="v">—</div><div class="foot">En ventana de resultados</div></div><div class="metric"><div class="k">Correlaciones evaluadas</div><div id="correlated" class="v">—</div><div class="foot">Wazuh reales, últimos 50</div></div><div class="metric"><div class="k">Incidentes con señales</div><div id="patterned" class="v">—</div><div class="foot">Observaciones, no ataques confirmados</div></div><div class="metric"><div class="k">Grupos temporales</div><div id="groupsCount" class="v">—</div><div class="foot">Agente Wazuh verificado, 30 minutos</div></div><div class="metric"><div class="k">Incidentes agrupados</div><div id="groupedCount" class="v">—</div><div class="foot">Dentro de los últimos 50 incidentes</div></div><div class="metric"><div class="k">Grupos con aumento de nivel</div><div id="risingGroups" class="v">—</div><div class="foot">Nivel Wazuh mayor que el primero del grupo</div></div><div class="metric"><div class="k">Grupos con reglas nuevas</div><div id="introducedGroups" class="v">—</div><div class="foot">Reglas Wazuh distintas de la inicial</div></div></div>
+<section class="panel"><div class="panelHead"><h2>Historial reciente</h2><div class="filters"><select id="source" aria-label="Filtrar origen"><option value="">Todos los orígenes</option><option value="wazuh">Wazuh</option><option value="grafana">Grafana</option><option value="prometheus">Prometheus</option><option value="loki">Loki</option></select><select id="priority" aria-label="Filtrar prioridad"><option value="">Todas las prioridades</option><option value="critical">Crítica</option><option value="high">Alta</option><option value="medium">Media</option><option value="low">Baja</option></select><select id="kind" aria-label="Filtrar eventos"><option value="">Todos</option><option value="real">Operativos</option><option value="synthetic">Sintéticos</option></select><select id="correlation" aria-label="Filtrar correlación"><option value="">Toda correlación</option><option value="signals">Con señales</option><option value="no_signals">Evaluado, sin señales</option><option value="insufficient_data">Datos insuficientes</option><option value="unavailable">No disponible</option><option value="not_recorded">Sin análisis histórico</option></select><select id="groupFilter" aria-label="Filtrar agrupación"><option value="">Toda agrupación</option><option value="grouped">Agrupados</option><option value="single">Sin grupo</option><option value="insufficient_data">Identidad insuficiente</option><option value="not_recorded">No calculado</option></select><select id="evolutionFilter" aria-label="Filtrar evolución"><option value="">Toda evolución</option><option value="rise">Subida de nivel</option><option value="new_rules">Reglas nuevas</option><option value="observed">Evaluados</option><option value="not_recorded">No evaluados</option></select><input id="search" placeholder="Buscar incidente…" aria-label="Buscar incidentes"></div></div><div class="scroll"><table><thead><tr><th>ID / Fecha</th><th>Origen</th><th>Incidente</th><th>Prioridad</th><th>Análisis</th><th>Correlación</th><th>Grupo</th><th>Evolución</th></tr></thead><tbody id="rows"><tr><td colspan="8" class="empty">Conecta para ver tus incidentes.</td></tr></tbody></table></div></section>
+<section class="panel"><div class="panelHead"><h2>Agrupaciones y evolución · Bloques 8–9</h2><span class="muted">Vista parcial, solo lectura</span></div><div id="groupList" class="group-list"><div class="empty">Sin datos</div></div></section>
+<section class="panel"><div class="panelHead"><h2>Detalle del incidente</h2><span class="muted" id="selectedLabel">Selecciona una fila</span></div><div id="detail" class="empty">Aquí aparecerán el resumen, las evidencias y las recomendaciones generadas por el bot.</div></section>
+<div class="footer">Actualización automática cada 15 segundos mientras esta pestaña está abierta. Solo lectura · Token de acceso no persistido.</div>
+</main>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id);let token='',incidents=[],selected=null,refreshTimer=null,loading=false;
+const names={critical:'Crítica',high:'Alta',medium:'Media',low:'Baja'};
+function node(tag,txt,cls){let el=document.createElement(tag);if(txt!==undefined)el.textContent=String(txt);if(cls)el.className=cls;return el}
+function setText(id,v){$(id).textContent=String(v)}
+function notice(message,error=false){$('notice').textContent=message;$('notice').className='notice'+(error?' error':'')}
+function state(mode,text){$('dot').className='dot'+(mode==='ok'?' ok':mode==='bad'?' bad':'');setText('connection',text)}
+function fmt(date){const v=new Date(date);return Number.isNaN(v.valueOf())?String(date||'—'):v.toLocaleString('es-ES',{dateStyle:'short',timeStyle:'medium'})}
+function priority(i){let p=String((i.analysis||{}).priority||'').toLowerCase();return names[p]?p:'unknown'}
+function badge(value,kind){return node('span',value,'tag '+(kind||''))}
+// Use only the documented Block 5 schema. Invalid or historical data is not "no attack".
+const sourceLabels={wazuh_webhook:'Wazuh webhook',wazuh_indexer:'Wazuh Indexer',prometheus:'Prometheus',loki_timeline:'Loki Timeline'};
+const signalLabels={
+ wazuh_rule_repeated_15m:'Regla Wazuh repetida',
+ wazuh_multiple_rules_observed_15m:'Reglas Wazuh diferentes',
+ prometheus_scrape_unavailable:'Recopilación Prometheus fallida',
+ loki_observed_log_volume_increase:'Aumento de volumen de logs',
+ loki_ssh_service_log_volume_increase:'Aumento de logs del servicio SSH'
+};
+const correlationLabels={patterns:'Con señales',no_signals:'Sin señales',insufficient_data:'Datos insuficientes',unavailable:'No disponible',not_recorded:'Sin análisis',not_applicable:'No aplica',invalid:'No verificable'};
+function safeObject(v){return v!==null&&typeof v==='object'&&!Array.isArray(v)}
+function safeCount(v,max=100000000){return Number.isSafeInteger(v)&&v>=0&&v<=max}
+function safeWindow(v){return Array.isArray(v)&&v.length===3&&v.every(n=>safeCount(n,100000))}
+function safeSignal(s){
+ if(!safeObject(s)||!Object.hasOwn(signalLabels,s.kind))return false;
+ if(s.source==='wazuh_indexer'&&s.kind==='wazuh_rule_repeated_15m')return safeCount(s.count)&&s.window_minutes===15;
+ if(s.source==='wazuh_indexer'&&s.kind==='wazuh_multiple_rules_observed_15m')return safeCount(s.minimum_distinct_rules)&&s.window_minutes===15;
+ if(s.source==='prometheus'&&s.kind==='prometheus_scrape_unavailable')return s.observation==='up_equals_zero';
+ if(s.source==='loki_timeline'&&(s.kind==='loki_observed_log_volume_increase'||s.kind==='loki_ssh_service_log_volume_increase'))return s.bucket_minutes===5&&safeWindow(s.window_counts)&&['event_time','reception_time'].includes(s.anchor_type);
+ return false;
+}
+function correlation(i){
+ if(i.source!=='wazuh'||i.synthetic)return {key:'not_applicable'};
+ const v=i.analysis?.cross_source_patterns;
+ if(v===undefined)return {key:'not_recorded'};
+ if(!safeObject(v)||v.version!=='cross-source-patterns-v1'||!['ok','insufficient_data','unavailable'].includes(v.status)||v.changes_triage!==false||v.changes_notifications!==false)return {key:'invalid'};
+ if(v.status!=='ok')return {key:v.status};
+ if(!Array.isArray(v.signals)||v.signals.length>8||!safeCount(v.signal_count,8)||v.signal_count!==v.signals.length||!v.signals.every(safeSignal)||!Array.isArray(v.sources_validated)||v.sources_validated.length>4||!v.sources_validated.every(s=>Object.hasOwn(sourceLabels,s))||!v.sources_validated.includes('wazuh_webhook')||!v.signals.every(s=>v.sources_validated.includes(s.source))||new Set(v.sources_validated).size!==v.sources_validated.length)return {key:'invalid'};
+ return {key:v.signal_count?'patterns':'no_signals',data:v};
+}
+function signalDetail(s){
+ switch(s.kind){
+ case 'wazuh_rule_repeated_15m':return String(s.count)+' alertas de la misma regla en 15 min (no intentos SSH)';
+ case 'wazuh_multiple_rules_observed_15m':return 'Al menos '+s.minimum_distinct_rules+' reglas diferentes en 15 min';
+ case 'prometheus_scrape_unavailable':return 'up=0 indica fallo de scrape; no demuestra que el host esté apagado';
+ case 'loki_observed_log_volume_increase':case 'loki_ssh_service_log_volume_increase':return 'Volumen por ventanas de 5 min: '+s.window_counts.join(' / ')+' (no demuestra fallos de autenticación)';
+ default:return 'Observación no clasificada';
+ }
+}
+function renderCorrelation(i,area){
+ const c=correlation(i);area.append(node('h4','Correlación multifuente · Bloque 5'));
+ const head=node('div');head.append(badge(correlationLabels[c.key],c.key));area.append(head);
+ if(c.key==='not_applicable'){area.append(node('p','Solo se calcula para eventos Wazuh reales nuevos.','correlation-note'));return}
+ if(c.key==='not_recorded'){area.append(node('p','No calculada para este incidente: puede ser anterior a la activación. No equivale a ausencia de actividad.','correlation-note'));return}
+ if(c.key==='insufficient_data'){area.append(node('p','No hay identidad o metadatos verificados suficientes para correlacionar. No se infiere ausencia de ataque.','correlation-note'));return}
+ if(c.key==='unavailable'||c.key==='invalid'){area.append(node('p','Correlación no disponible o datos no verificables. Consultar las fuentes originales si es necesario.','correlation-note'));return}
+ const v=c.data;const group=node('div',undefined,'correlation-sources');v.sources_validated.forEach(s=>group.append(badge(sourceLabels[s])));area.append(node('h4','Fuentes validadas'),group);
+ const missing=['wazuh_indexer','prometheus','loki_timeline'].filter(s=>!v.sources_validated.includes(s));
+ area.append(node('p',missing.length?'No verificadas en este incidente: '+missing.map(s=>sourceLabels[s]).join(', ')+'. Esto no indica necesariamente una caída.':'Se validaron las tres fuentes complementarias.','correlation-note'));
+ if(c.key==='no_signals'){area.append(node('p','No se observaron patrones definidos en las fuentes validadas. No descarta actividad maliciosa.','correlation-note'))}
+ else {area.append(node('h4','Señales observadas ('+v.signal_count+')'));v.signals.forEach(s=>{const el=node('div',undefined,'correlation-signal');el.append(node('strong',signalLabels[s.kind]),badge(sourceLabels[s.source]));el.append(node('div',signalDetail(s),'small'));area.append(el)})}
+ area.append(node('p','Las ventanas de los sensores no prueban causalidad. Estas observaciones no modifican Smart Triage, notificaciones ni acciones correctivas.','correlation-note'));
+}
+
+// Block 7: only a timeline of exact-agent authenticated Wazuh webhooks received by this bot.
+const sequenceLabels={same_rule_received_at_least_3_times_30m:'Regla recibida al menos 3 veces en 30 min',different_wazuh_rules_received_30m:'Distintas reglas recibidas en 30 min',at_least_3_webhooks_received_5m:'Al menos 3 webhooks recibidos en 5 min'};
+function temporalSequence(i){
+ if(i.source!=='wazuh'||i.synthetic)return {key:'not_applicable'};
+ const v=i.analysis?.temporal_sequence;
+ if(v===undefined)return {key:'not_recorded'};
+ if(!safeObject(v)||v.version!=='wazuh-received-sequence-v1'||!['ok','insufficient_data','unavailable'].includes(v.status)||v.changes_triage!==false||v.changes_notifications!==false||v.sent_to_ai!==false||v.raw_logs_stored!==false)return {key:'invalid'};
+ if(v.status!=='ok')return {key:v.status};
+ if(v.source!=='authenticated_wazuh_webhooks_received_by_bot'||v.scope!=='same_verified_wazuh_agent_and_host'||v.time_basis!=='bot_reception_time_not_original_event_time'||v.window_minutes!==30||typeof v.truncated!=='boolean')return {key:'invalid'};
+ if(!safeCount(v.previous_verified_incidents,100)||!safeCount(v.prior_same_rule,100)||v.prior_same_rule>v.previous_verified_incidents||!safeCount(v.distinct_rule_count_including_current,101)||v.distinct_rule_count_including_current<1)return {key:'invalid'};
+ if(!Array.isArray(v.observations)||v.observations.length>3||!v.observations.every(s=>typeof s==='string'&&Object.hasOwn(sequenceLabels,s))||new Set(v.observations).size!==v.observations.length)return {key:'invalid'};
+ if(!Array.isArray(v.timeline)||v.timeline.length<1||v.timeline.length>6||v.timeline.length>v.previous_verified_incidents+1)return {key:'invalid'};
+ if(!v.timeline.every((s,j)=>safeObject(s)&&/^\d{1,6}$/.test(s.rule_id)&&safeCount(s.age_seconds,1800)&&(j===v.timeline.length-1?(s.incident_id===null&&s.age_seconds===0):(safeCount(s.incident_id,1e12)&&s.incident_id>0))))return {key:'invalid'};
+ if(v.timeline.some((s,j)=>j>0&&v.timeline[j-1].age_seconds<s.age_seconds))return {key:'invalid'};
+ return {key:'ok',data:v};
+}
+function renderTemporalSequence(i,area){
+ const c=temporalSequence(i);
+ area.append(node('h4','Secuencia temporal de Wazuh · Bloque 7'));
+ if(c.key==='not_applicable'){area.append(node('p','Solo disponible para eventos Wazuh reales.','correlation-note'));return}
+ if(c.key==='not_recorded'){area.append(node('p','Sin secuencia almacenada: incidente anterior a la activación.','correlation-note'));return}
+ if(c.key==='insufficient_data'){area.append(node('p','Identidad o metadatos insuficientes para una secuencia fiable.','correlation-note'));return}
+ if(c.key!=='ok'){area.append(node('p','Secuencia no disponible o no verificable.','correlation-note'));return}
+ const v=c.data;
+ area.append(node('p',v.previous_verified_incidents+' incidentes anteriores del mismo agente verificado en 30 min. Recuento parcial de webhooks recibidos por este bot.','correlation-note'));
+ if(v.truncated)area.append(node('p','Límite de lectura alcanzado: la secuencia puede ser incompleta.','correlation-note'));
+ if(v.observations.length){v.observations.forEach(s=>area.append(node('div',sequenceLabels[s],'correlation-signal')))}
+ else area.append(node('p','No se cumplen los patrones temporales definidos. No descarta actividad maliciosa.','correlation-note'));
+ const group=node('div',undefined,'temporal-list');
+ v.timeline.forEach(s=>{const el=node('div',undefined,'temporal-item');el.append(node('strong',s.incident_id===null?'Incidente actual':'Incidente #'+s.incident_id),node('span','Regla '+s.rule_id+' · '+(s.age_seconds===0?'ahora':Math.floor(s.age_seconds/60)+' min antes') ));group.append(el)});
+ area.append(group,node('p','Orden por recepción del bot, no por hora original del evento. No demuestra intrusión, causalidad ni progresión de ataque.','correlation-note'));
+}
+
+
+// Block 8: render only strict, backend-verified, ephemeral groups (no AI or automated response).
+const groupLabels={grouped:'Agrupado',single:'Sin grupo',insufficient_data:'Identidad insuficiente',not_applicable:'No aplica',not_recorded:'No calculado',invalid:'No verificable'};
+const groupObservationLabels={repeated_rule:'Regla repetida',multiple_rules:'Varias reglas Wazuh',burst_5m:'3 incidentes recibidos en 5 minutos'};
+function grouping(i){
+ if(i.source!=='wazuh'||i.synthetic)return {key:'not_applicable'};
+ const v=i.incident_group;
+ if(v===undefined)return {key:'not_recorded'};
+ if(!safeObject(v)||v.version!=='bot-incident-groups-v1'||v.scope!=='last_50_incidents_received_by_bot'||v.time_basis!=='bot_reception_time'||v.window_minutes!==30||v.limited_history!==true||v.changes_triage!==false||v.changes_notifications!==false||v.sent_to_ai!==false||v.automatic_actions!==false||!['grouped','single','insufficient_data','not_applicable'].includes(v.status))return {key:'invalid'};
+ if(v.status==='insufficient_data'||v.status==='not_applicable')return {key:v.status};
+ if(!safeCount(v.member_count,50)||v.member_count<1||!Array.isArray(v.member_ids)||v.member_count!==v.member_ids.length||new Set(v.member_ids).size!==v.member_ids.length||!v.member_ids.every(n=>safeCount(n,1e12)&&n>0)||!v.member_ids.includes(i.id))return {key:'invalid'};
+ if(!Array.isArray(v.rule_ids)||v.rule_ids.length<1||v.rule_ids.length>50||!v.rule_ids.every(s=>typeof s==='string'&&/^\d{1,6}$/.test(s))||new Set(v.rule_ids).size!==v.rule_ids.length||v.distinct_rule_count!==v.rule_ids.length||!safeCount(v.max_rule_level,16)||!['low','medium','high','critical'].includes(v.max_priority))return {key:'invalid'};
+ if(!Array.isArray(v.observations)||v.observations.length>3||new Set(v.observations).size!==v.observations.length||!v.observations.every(s=>Object.hasOwn(groupObservationLabels,s)))return {key:'invalid'};
+ if(v.status==='grouped'&&(v.member_count<2||typeof v.group_id!=='string'||!/^wazuh-window-[1-9]\d{0,11}$/.test(v.group_id)||!v.member_ids.includes(Number(v.group_id.slice(13)))))return {key:'invalid'};
+ if(v.status==='single'&&(v.member_count!==1||v.group_id!==null))return {key:'invalid'};
+ return {key:v.status,data:v};
+}
+function renderGrouping(i,area){
+ const g=grouping(i);
+ area.append(node('h4','Agrupación de incidentes · Bloque 8'));
+ if(g.key==='not_recorded'){area.append(node('p','Agrupación no activada o todavía no calculada.','correlation-note'));return}
+ if(g.key==='not_applicable'){area.append(node('p','Solo se agrupan incidentes Wazuh operativos con identidad verificada.','correlation-note'));return}
+ if(g.key==='insufficient_data'){area.append(node('p','Sin identidad Wazuh suficientemente verificada para agrupar.','correlation-note'));return}
+ if(g.key==='invalid'){area.append(node('p','Datos de agrupación no verificables.','correlation-note'));return}
+ const v=g.data;
+ if(g.key==='single')area.append(node('p','Incidente sin otros relacionados dentro de la vista disponible. Esto no descarta eventos fuera de la muestra.','correlation-note'));
+ else area.append(node('p','Grupo temporal '+v.group_id+' · '+v.member_count+' incidentes · nivel máximo Wazuh '+v.max_rule_level+' ('+names[v.max_priority]+').','correlation-note'));
+ area.append(node('p','Reglas verificadas: '+v.rule_ids.join(', ')+' · Incidentes: '+v.member_ids.map(x=>'#'+x).join(', '),'correlation-note'));
+ if(v.observations.length){const list=node('ul');v.observations.forEach(s=>list.append(node('li',groupObservationLabels[s])));area.append(list)}
+ area.append(node('p','Vista parcial de los últimos 50 incidentes. El grupo puede cambiar al actualizarse la ventana. No demuestra causalidad, no silencia alertas y no modifica Smart Triage.','correlation-note'));
+}
+// Block 9: strict, read-only review flags derived only from verified Wazuh group records.
+const evolutionLabels={observed:'Evolución evaluada',single:'Sin evolución',not_applicable:'No aplica',insufficient_data:'Datos insuficientes',not_recorded:'No evaluado',invalid:'No verificable'};
+const evolutionFlagLabels={later_higher_rule_level:'Nivel máximo superior al primer evento',new_rule_ids:'Aparecen reglas Wazuh distintas de la inicial',burst_5m:'Tres incidentes recibidos en 5 minutos'};
+function evolution(i){
+ if(i.source!=='wazuh'||i.synthetic)return {key:'not_applicable'};
+ const v=i.group_evolution;
+ if(v===undefined)return {key:'not_recorded'};
+ if(!safeObject(v)||v.version!=='bot-group-evolution-v1'||v.scope!=='last_50_incidents_received_by_bot'||v.time_basis!=='bot_reception_time'||v.window_minutes!==30||v.limited_history!==true||v.priority_source!=='max_verified_wazuh_rule_level'||v.changes_triage!==false||v.changes_notifications!==false||v.sent_to_ai!==false||v.automatic_actions!==false||!['observed','single','insufficient_data','not_applicable'].includes(v.status))return {key:'invalid'};
+ const g=grouping(i);
+ if(v.status!=='observed'){
+  if(v.status==='single'&&g.key==='single')return {key:'single'};
+  if(v.status==='insufficient_data'&&g.key==='insufficient_data')return {key:'insufficient_data'};
+  return {key:'invalid'};
+ }
+ if(g.key!=='grouped'||v.group_id!==g.data.group_id||v.member_count!==g.data.member_count||v.max_rule_level!==g.data.max_rule_level||v.review_priority!==g.data.max_priority)return {key:'invalid'};
+ if(!safeCount(v.first_rule_level,16)||!safeCount(v.latest_rule_level,16)||!safeCount(v.max_rule_level,16)||v.max_rule_level<Math.max(v.first_rule_level,v.latest_rule_level)||typeof v.peak_increased_after_first!=='boolean'||v.peak_increased_after_first!==(v.max_rule_level>v.first_rule_level))return {key:'invalid'};
+ if(!Array.isArray(v.introduced_rule_ids)||v.introduced_rule_ids.length>50||new Set(v.introduced_rule_ids).size!==v.introduced_rule_ids.length||!v.introduced_rule_ids.every(x=>typeof x==='string'&&/^\d{1,6}$/.test(x)&&g.data.rule_ids.includes(x)))return {key:'invalid'};
+ if(!Array.isArray(v.review_indicators)||v.review_indicators.length>3||new Set(v.review_indicators).size!==v.review_indicators.length||!v.review_indicators.every(x=>Object.hasOwn(evolutionFlagLabels,x)))return {key:'invalid'};
+ if(v.review_indicators.includes('later_higher_rule_level')!==v.peak_increased_after_first||v.review_indicators.includes('new_rule_ids')!==(v.introduced_rule_ids.length>0)||v.review_indicators.includes('burst_5m')!==g.data.observations.includes('burst_5m'))return {key:'invalid'};
+ const expected=v.max_rule_level>=15?'critical':v.max_rule_level>=10?'high':v.max_rule_level>=7?'medium':'low';
+ if(v.review_priority!==expected)return {key:'invalid'};
+ return {key:'observed',data:v};
+}
+function renderEvolution(i,area){
+ const e=evolution(i);
+ area.append(node('h4','Evolución del grupo · Bloque 9'));
+ if(e.key==='not_recorded'){area.append(node('p','Evolución no calculada: Bloque 9 desactivado o todavía no desplegado.','correlation-note'));return}
+ if(e.key==='single'){area.append(node('p','Solo hay un incidente verificable en la ventana; no se infiere tendencia.','correlation-note'));return}
+ if(e.key==='not_applicable'){area.append(node('p','Aplicable únicamente a grupos de incidentes Wazuh reales.','correlation-note'));return}
+ if(e.key==='insufficient_data'||e.key==='invalid'){area.append(node('p','Sin datos suficientes para una comparación de evolución verificable.','correlation-note'));return}
+ const v=e.data;
+ area.append(node('p','Niveles Wazuh observados: primero '+v.first_rule_level+' · último '+v.latest_rule_level+' · máximo '+v.max_rule_level+'. Prioridad de revisión: '+names[v.review_priority]+' (basada solo en la regla máxima).','correlation-note'));
+ if(v.review_indicators.length){const ul=node('ul');v.review_indicators.forEach(f=>ul.append(node('li',evolutionFlagLabels[f])));area.append(ul)}
+ else area.append(node('p','Sin cambios destacados según estos indicadores; no implica mejora ni ausencia de riesgo.','correlation-note'));
+ if(v.introduced_rule_ids.length)area.append(node('p','Reglas adicionales observadas: '+v.introduced_rule_ids.join(', '),'correlation-note'));
+ area.append(node('p','Comparación parcial de los últimos 50 incidentes, según recepción del bot. No modifica gravedad individual, alertas, Gemini ni acciones. Una bajada del último nivel no demuestra resolución.','correlation-note'));
+}
+function renderGroupList(){
+ const area=$('groupList');area.replaceChildren();
+ const groups=new Map();
+ incidents.forEach(i=>{const g=grouping(i);if(g.key==='grouped'&&!groups.has(g.data.group_id))groups.set(g.data.group_id,{data:g.data,incident:i})});
+ if(!groups.size){area.append(node('p',incidents.some(i=>i.source==='wazuh'&&!i.synthetic&&i.incident_group!==undefined)?'No hay grupos verificados en los últimos 50 incidentes.':'Sin agrupaciones calculadas. Activa el Bloque 8 para consultar esta vista.','empty'));return}
+ groups.forEach(({data:g,incident:i})=>{
+  const card=node('div',undefined,'group-card');card.tabIndex=0;card.setAttribute?.('role','button');
+  card.append(node('strong',g.member_count+' incidentes · '+g.group_id),badge(names[g.max_priority],g.max_priority));
+  card.append(node('div','Reglas: '+g.rule_ids.join(', ')+' · IDs: '+g.member_ids.map(x=>'#'+x).join(', '),'small'));
+  card.append(node('div',g.observations.map(s=>groupObservationLabels[s]).join(' · ')||'Relacionados por identidad y ventana temporal','small'));
+  const e=evolution(i);if(e.key==='observed'){card.append(node('div','Evolución: '+(e.data.peak_increased_after_first?'subida de nivel observada':'sin subida de nivel observada')+' · '+e.data.introduced_rule_ids.length+' reglas añadidas tras la primera','small'));}
+  const select=()=>{selected=i.id;renderTable();renderDetail()};card.addEventListener('click',select);card.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();select()}});area.append(card);
+ });
+}
+
+function filtered(){const s=$('source').value,p=$('priority').value,k=$('kind').value,c=$('correlation').value,g=$('groupFilter').value,ev=$('evolutionFilter').value,q=$('search').value.trim().toLocaleLowerCase();return incidents.filter(i=>(!s||i.source===s)&&(!p||priority(i)===p)&&(!k||(k==='synthetic'?i.synthetic:!i.synthetic))&&(!c||(c==='signals'?correlation(i).key==='patterns':correlation(i).key===c))&&(!g||grouping(i).key===g)&&(!ev||(ev==='rise'?evolution(i).key==='observed'&&evolution(i).data.peak_increased_after_first:ev==='new_rules'?evolution(i).key==='observed'&&evolution(i).data.introduced_rule_ids.length>0:evolution(i).key===ev))&&(!q||[i.id,i.source,i.title,i.analysis?.summary].join(' ').toLocaleLowerCase().includes(q)))}
+function renderTable(){const body=$('rows');body.replaceChildren();const items=filtered();if(!items.length){const tr=node('tr');const td=node('td',incidents.length?'Ningún incidente coincide con los filtros.':'Todavía no hay incidentes.','empty');td.colSpan=8;tr.append(td);body.append(tr);return}items.forEach(i=>{const tr=node('tr');tr.tabIndex=0;if(i.id===selected)tr.className='selected';const a=node('td');a.append(node('strong','#'+i.id),node('div',fmt(i.received_at),'small'));const b=node('td');b.append(badge(i.source,'source'));const c=node('td');c.append(node('div',i.title,'truncate'),node('div',i.synthetic?'Sintético · prueba':'Operativo','small'));const d=node('td');d.append(badge(names[priority(i)]||'Sin clasificar',priority(i)));const e=node('td');e.append(badge(i.mode||'—',i.mode==='gemini'?'gemini':''));const f=node('td');const cc=correlation(i);f.append(badge(correlationLabels[cc.key],cc.key));const groupCell=node('td');const group=grouping(i);groupCell.append(badge(groupLabels[group.key],group.key));const evolutionCell=node('td');const evo=evolution(i);evolutionCell.append(badge(evo.key==='observed'?(evo.data.peak_increased_after_first?'Subida Wazuh':evo.data.introduced_rule_ids.length?'Reglas nuevas':'Sin subida observada'):evolutionLabels[evo.key],evo.key==='observed'&&evo.data.peak_increased_after_first?'rise':evo.key));tr.append(a,b,c,d,e,f,groupCell,evolutionCell);const select=()=>{selected=i.id;renderTable();renderDetail()};tr.addEventListener('click',select);tr.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();select()}});body.append(tr)})}
+function renderDetail(){const i=incidents.find(x=>x.id===selected),area=$('detail');area.replaceChildren();if(!i){area.className='empty';area.textContent='Selecciona un incidente para inspeccionar el análisis.';setText('selectedLabel','Selecciona una fila');return}area.className='detail';setText('selectedLabel','#'+i.id+' · '+fmt(i.received_at));const a=i.analysis||{};const h=node('div',undefined,'detailTop'),title=node('h3',i.title),tags=node('div');tags.append(badge(i.source),node('span','  '),badge(names[priority(i)]||'Sin clasificar',priority(i)),node('span','  '),badge(i.mode||'—',i.mode==='gemini'?'gemini':''));h.append(title,tags);area.append(h);function section(label,text){area.append(node('h4',label),node('p',text||'No disponible'))}section('Resumen',a.summary);const tri=a.triage||{};if(tri.policy_version==='triage-v1'){const trlabels={notify:'NOTIFICAR',review:'REVISIÓN HUMANA',suppress:'SIN AVISO'};section('Decisión de triaje', (trlabels[tri.decision]||'SIN CLASIFICAR')+' — '+(tri.reason||'Sin explicación'));section('Estimación de falso positivo', (tri.false_positive||'unknown')+' · confianza: '+(tri.confidence||'low')+' · repetidos 30 min: '+(tri.recent_same_rule_host_30m??0));}area.append(node('h4','Evidencias'));const evid=Array.isArray(a.evidence)?a.evidence:(a.evidence?[a.evidence]:[]);if(evid.length){const ul=node('ul');evid.forEach(e=>ul.append(node('li',e)));area.append(ul)}else area.append(node('p','No se registraron evidencias adicionales.'));section('Recomendación',a.recommendation);const op=i.operator_guidance;if(op&&op.version==='alloy-operator-guidance-v1'&&op.execution_allowed===false&&op.component==='alloy_host'){section('Propuesta operativa · revisión humana','Posible incidencia Alloy; aviso no verificado por systemd. Estado del servicio: desconocido. No se ha ejecutado ninguna acción.');section('Origen de la señal',op.recent_incident?'Aviso reciente; comprobar estado real en AWX.':'Aviso antiguo o fecha no verificable; no presupone una avería actual.');area.append(node('h4','Evidencias y limites'));const evs=node('ul');if(Array.isArray(op.evidence))op.evidence.slice(0,5).forEach(x=>evs.append(node('li',x)));area.append(evs);section('Diagnóstico AWX (manual)',op.audit_job_template);section('Recuperación AWX (solo tras aprobación)',op.recovery_workflow);area.append(node('h4','Pasos seguros'));const steps=node('ul');if(Array.isArray(op.steps))op.steps.slice(0,8).forEach(x=>steps.append(node('li',x)));area.append(steps)}section('Incertidumbre',a.uncertainty);renderCorrelation(i,area);renderTemporalSequence(i,area);renderGrouping(i,area);renderEvolution(i,area);area.append(node('h4','Contexto'),node('p','Origen: '+i.source+' · Severidad original: '+i.severity+' · '+(i.synthetic?'Evento sintético':'Evento operativo')+' · Modo: '+i.mode))}
+function render(){setText('total',incidents.length);setText('high',incidents.filter(i=>['high','critical'].includes(priority(i))).length);setText('ai',incidents.filter(i=>i.mode==='gemini').length);setText('wazuh',incidents.filter(i=>i.source==='wazuh').length);setText('correlated',incidents.filter(i=>['patterns','no_signals'].includes(correlation(i).key)).length);setText('patterned',incidents.filter(i=>correlation(i).key==='patterns').length);const grouped=incidents.filter(i=>grouping(i).key==='grouped');setText('groupsCount',new Set(grouped.map(i=>grouping(i).data.group_id)).size);setText('groupedCount',grouped.length);const evolutions=new Map();incidents.forEach(i=>{const ev=evolution(i);if(ev.key==='observed')evolutions.set(ev.data.group_id,ev.data)});setText('risingGroups',[...evolutions.values()].filter(e=>e.peak_increased_after_first).length);setText('introducedGroups',[...evolutions.values()].filter(e=>e.introduced_rule_ids.length>0).length);renderGroupList();if(selected===null&&incidents.length)selected=incidents[0].id;renderTable();renderDetail()}
+async function fetchIncidents(){if(!token||loading)return;loading=true;try{const res=await fetch('/incidents',{headers:{'Authorization':'Bearer '+token},cache:'no-store'});if(res.status===401||res.status===503){disconnect();notice('Token incorrecto o servicio no configurado.',true);return}if(!res.ok)throw Error('HTTP '+res.status);const data=await res.json();if(!Array.isArray(data))throw Error('Respuesta inesperada');incidents=data;render();state('ok','Conectado · '+fmt(new Date().toISOString()));notice('Conexión protegida activa. '+incidents.length+' incidentes recibidos (máximo 50).')}catch(e){state('bad','Conexión interrumpida');notice('No se han podido actualizar los incidentes: '+e.message,true)}finally{loading=false}}
+function disconnect(){token='';incidents=[];selected=null;if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null}$('token').value='';$('refresh').disabled=true;$('disconnect').disabled=true;setText('total','—');setText('high','—');setText('ai','—');setText('wazuh','—');setText('correlated','—');setText('patterned','—');setText('groupsCount','—');setText('groupedCount','—');setText('risingGroups','—');setText('introducedGroups','—');$('groupList').replaceChildren();state('idle','Sin conectar');renderTable();renderDetail()}
+$('connect').addEventListener('click',()=>{const v=$('token').value.trim();if(!v){notice('Introduce el token.',true);return}token=v;$('token').value='';$('refresh').disabled=false;$('disconnect').disabled=false;if(refreshTimer)clearInterval(refreshTimer);fetchIncidents();refreshTimer=setInterval(fetchIncidents,15000)});
+$('token').addEventListener('keydown',e=>{if(e.key==='Enter')$('connect').click()});$('refresh').addEventListener('click',fetchIncidents);$('disconnect').addEventListener('click',()=>{disconnect();notice('Sesión cerrada. El token no se ha guardado.')});['source','priority','kind','correlation','groupFilter','evolutionFilter','search'].forEach(id=>$(id).addEventListener(id==='search'?'input':'change',renderTable));
+})();
+</script>
+</body>
+</html>

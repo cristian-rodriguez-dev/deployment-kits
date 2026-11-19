@@ -1,0 +1,469 @@
+{
+  "schema_version": "offline-triage-cases-v1",
+  "provenance": "synthetic_examples_not_ground_truth",
+  "cases": [
+    {
+      "id": "critical-model-tries-suppress",
+      "severity": 15,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 4,
+      "primary_analysis": {
+        "priority": "low",
+        "classification": "suspicious",
+        "false_positive": "likely",
+        "confidence": "high",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd",
+        "attack"
+      ],
+      "mitre_ids": [
+        "T1110"
+      ],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "suppress",
+        "classification": "suspicious",
+        "priority": "low",
+        "false_positive": "likely",
+        "confidence": "high",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      },
+      "expected_policy_decision": "notify",
+      "expected_grounding": "cited_observations"
+    },
+    {
+      "id": "high-level-without-ai",
+      "severity": 10,
+      "synthetic_event": false,
+      "mode": "fallback",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "low",
+        "classification": "suspicious",
+        "false_positive": "unknown",
+        "confidence": "low",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": null,
+      "expected_policy_decision": "notify",
+      "expected_grounding": "not_evaluated"
+    },
+    {
+      "id": "medium-recurrent-ai-asks-notify",
+      "severity": 8,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 3,
+      "primary_analysis": {
+        "priority": "medium",
+        "classification": "suspicious",
+        "false_positive": "unlikely",
+        "confidence": "medium",
+        "notify": true
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "review",
+        "classification": "suspicious",
+        "priority": "medium",
+        "false_positive": "unlikely",
+        "confidence": "medium",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "wazuh.bot_repeat_count"
+        ]
+      },
+      "expected_policy_decision": "notify",
+      "expected_grounding": "cited_observations"
+    },
+    {
+      "id": "medium-uncertain-review",
+      "severity": 8,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "medium",
+        "classification": "suspicious",
+        "false_positive": "possible",
+        "confidence": "low",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "notify",
+        "classification": "suspicious",
+        "priority": "medium",
+        "false_positive": "possible",
+        "confidence": "low",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      },
+      "expected_policy_decision": "review",
+      "expected_grounding": "cited_observations"
+    },
+    {
+      "id": "low-reported-benign",
+      "severity": 3,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "low",
+        "classification": "benign",
+        "false_positive": "unlikely",
+        "confidence": "medium",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "review",
+        "classification": "benign",
+        "priority": "low",
+        "false_positive": "unlikely",
+        "confidence": "medium",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      },
+      "expected_policy_decision": "suppress",
+      "expected_grounding": "cited_observations"
+    },
+    {
+      "id": "missing-shadow-proposal",
+      "severity": 8,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "medium",
+        "classification": "suspicious",
+        "false_positive": "possible",
+        "confidence": "low",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": null,
+      "expected_policy_decision": "review",
+      "expected_grounding": "not_evaluated"
+    },
+    {
+      "id": "unverified-agent-must-fail-closed",
+      "severity": 9,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "medium",
+        "classification": "suspicious",
+        "false_positive": "possible",
+        "confidence": "low",
+        "notify": false
+      },
+      "agent_identity_match": false,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "notify",
+        "classification": "suspicious",
+        "priority": "medium",
+        "false_positive": "possible",
+        "confidence": "low",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      },
+      "expected_policy_decision": "review",
+      "expected_grounding": "not_evaluated"
+    },
+    {
+      "id": "invented-loki-citation",
+      "severity": 8,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "medium",
+        "classification": "suspicious",
+        "false_positive": "possible",
+        "confidence": "low",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "suppress",
+        "classification": "suspicious",
+        "priority": "medium",
+        "false_positive": "possible",
+        "confidence": "low",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "cross.loki_ssh_service_log_volume_increase"
+        ]
+      },
+      "expected_policy_decision": "review",
+      "expected_grounding": "unsupported_citations"
+    },
+    {
+      "id": "verified-prometheus-citation",
+      "severity": 8,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "medium",
+        "classification": "suspicious",
+        "false_positive": "unknown",
+        "confidence": "low",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [
+        "prometheus_scrape_unavailable"
+      ],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "review",
+        "classification": "suspicious",
+        "priority": "medium",
+        "false_positive": "unknown",
+        "confidence": "low",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "cross.prometheus_scrape_unavailable"
+        ]
+      },
+      "expected_policy_decision": "review",
+      "expected_grounding": "cited_observations"
+    },
+    {
+      "id": "verified-loki-volume-not-login",
+      "severity": 8,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "medium",
+        "classification": "suspicious",
+        "false_positive": "unknown",
+        "confidence": "low",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [
+        "loki_ssh_service_log_volume_increase"
+      ],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "review",
+        "classification": "suspicious",
+        "priority": "medium",
+        "false_positive": "unknown",
+        "confidence": "low",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "cross.loki_ssh_service_log_volume_increase"
+        ]
+      },
+      "expected_policy_decision": "review",
+      "expected_grounding": "cited_observations"
+    },
+    {
+      "id": "wazuh-sequence-and-group-growth",
+      "severity": 10,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 4,
+      "primary_analysis": {
+        "priority": "high",
+        "classification": "suspicious",
+        "false_positive": "unlikely",
+        "confidence": "high",
+        "notify": true
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [
+        "same_rule_received_at_least_3_times_30m",
+        "at_least_3_webhooks_received_5m"
+      ],
+      "group_observations": [
+        "later_higher_rule_level",
+        "new_rule_ids"
+      ],
+      "group_peak_level": 14,
+      "shadow_reply": {
+        "decision": "notify",
+        "classification": "suspicious",
+        "priority": "high",
+        "false_positive": "unlikely",
+        "confidence": "high",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "sequence.at_least_3_webhooks_received_5m",
+          "group.later_higher_rule_level"
+        ]
+      },
+      "expected_policy_decision": "notify",
+      "expected_grounding": "cited_observations"
+    },
+    {
+      "id": "synthetic-critical-never-notify",
+      "severity": 15,
+      "synthetic_event": true,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "critical",
+        "classification": "suspicious",
+        "false_positive": "unlikely",
+        "confidence": "high",
+        "notify": true
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "notify",
+        "classification": "suspicious",
+        "priority": "critical",
+        "false_positive": "unlikely",
+        "confidence": "high",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "wazuh.rule_level"
+        ]
+      },
+      "expected_policy_decision": "suppress",
+      "expected_grounding": "not_evaluated"
+    },
+    {
+      "id": "duplicated-citation-invalid",
+      "severity": 8,
+      "synthetic_event": false,
+      "mode": "gemini",
+      "recent_count": 1,
+      "primary_analysis": {
+        "priority": "medium",
+        "classification": "suspicious",
+        "false_positive": "possible",
+        "confidence": "low",
+        "notify": false
+      },
+      "agent_identity_match": true,
+      "rule_groups": [
+        "sshd"
+      ],
+      "mitre_ids": [],
+      "cross_signal_kinds": [],
+      "sequence_observations": [],
+      "group_observations": [],
+      "group_peak_level": null,
+      "shadow_reply": {
+        "decision": "notify",
+        "classification": "suspicious",
+        "priority": "medium",
+        "false_positive": "possible",
+        "confidence": "low",
+        "reason": "Simulated recommendation; human review required",
+        "supporting_evidence_ids": [
+          "wazuh.rule_level",
+          "wazuh.rule_level"
+        ]
+      },
+      "expected_policy_decision": "review",
+      "expected_grounding": "invalid_citations"
+    }
+  ]
+}

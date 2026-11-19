@@ -1,0 +1,105 @@
+- name: 05 | Grafana
+  hosts: grafana-servers
+  gather_facts: false
+  become: true
+  vars:
+    ubuntu26_grafana_bind: '{{ var_grafana_bind_address | default(''127.0.0.1'') }}'
+    ubuntu26_grafana_prometheus_url: http://prometheus:9090
+    grafana_secret: '{{ var_grafana_install_dir }}/secrets/admin_password'
+  tasks:
+  - name: Crear directorios Grafana
+    ansible.builtin.file:
+      path: '{{ item.path }}'
+      state: directory
+      owner: '{{ item.owner }}'
+      group: '{{ item.group }}'
+      mode: '{{ item.mode }}'
+    loop:
+    - path: '{{ var_grafana_install_dir }}/data'
+      owner: '472'
+      group: '472'
+      mode: '0750'
+    - path: '{{ var_grafana_install_dir }}/provisioning/datasources'
+      owner: root
+      group: root
+      mode: '0755'
+    - path: '{{ var_grafana_install_dir }}/secrets'
+      owner: root
+      group: root
+      mode: '0700'
+  - name: Detectar secreto inicial de Grafana
+    ansible.builtin.stat:
+      path: '{{ grafana_secret }}'
+    register: grafana_password_file
+  - name: Obtener contraseña inicial desde AWX
+    ansible.builtin.assert:
+      that:
+      - lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') | length >= 8
+      fail_msg: Configura VAR_GRAFANA_ADMIN_PASSWORD en credencial AWX
+    when: not grafana_password_file.stat.exists
+    no_log: true
+  - name: Guardar contraseña inicial solo la primera vez
+    ansible.builtin.copy:
+      dest: '{{ grafana_secret }}'
+      content: '{{ lookup(''ansible.builtin.env'', ''VAR_GRAFANA_ADMIN_PASSWORD'') }}'
+      owner: '472'
+      group: '472'
+      mode: '0400'
+      force: false
+    when: not grafana_password_file.stat.exists
+    no_log: true
+    diff: false
+  - name: Crear datasource Prometheus
+    ansible.builtin.template:
+      src: ../templates/grafana/datasources.yml.j2
+      dest: '{{ var_grafana_install_dir }}/provisioning/datasources/prometheus.yml'
+      mode: '0644'
+  - name: Obtener CA pública del Indexer desde el host
+    ansible.builtin.slurp:
+      src: '{{ var_wazuh_install_dir }}/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem'
+    register: wazuh_ca_file
+    no_log: true
+
+  - name: Preparar credenciales del datasource Wazuh
+    ansible.builtin.set_fact:
+      var_wazuh_admin_password: "{{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}"
+      var_wazuh_indexer_ca: "{{ wazuh_ca_file.content | b64decode }}"
+    no_log: true
+
+  - name: Exigir credencial de solo instalación del datasource
+    ansible.builtin.assert:
+      that: var_wazuh_admin_password | length >= 8
+      fail_msg: 'Adjunta también la credencial AWX Wazuh al Job 05'
+    no_log: true
+
+  - name: Configurar datasources Wazuh heredados
+    ansible.builtin.template:
+      src: ../templates/grafana/wazuh-datasources.yml.j2
+      dest: '{{ var_grafana_install_dir }}/provisioning/datasources/wazuh.yml'
+      owner: root
+      group: '472'
+      mode: '0640'
+    no_log: true
+    diff: false
+
+  - name: Crear Docker Compose Grafana
+    ansible.builtin.template:
+      src: ../templates/grafana/docker-compose.yml.j2
+      dest: '{{ var_grafana_install_dir }}/docker-compose.yml'
+      mode: '0644'
+  - name: Arrancar Grafana
+    community.docker.docker_compose_v2:
+      project_src: '{{ var_grafana_install_dir }}'
+      project_name: '{{ var_grafana_project_name }}'
+      state: present
+      pull: missing
+      recreate: auto
+  - name: Esperar Grafana
+    ansible.builtin.uri:
+      url: http://{{ ubuntu26_grafana_bind }}:{{ var_grafana_port }}/api/health
+      status_code: 200
+    register: grafana_ready
+    until: grafana_ready.status | default(0) == 200
+    retries: 30
+    delay: 5
+    changed_when: false

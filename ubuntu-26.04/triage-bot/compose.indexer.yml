@@ -1,0 +1,11 @@
+services:
+  triage-bot:
+    volumes:
+      - ./.local-secrets/indexer_password:/run/secrets/wazuh_indexer_password:ro
+      - ./.local-secrets/indexer_ca.pem:/run/secrets/wazuh_indexer_ca.pem:ro
+    environment:
+      WAZUH_INDEXER_URL: https://wazuh.indexer:9200
+      WAZUH_INDEXER_USERNAME: security_triage_indexer_ro
+      WAZUH_INDEXER_PASSWORD_FILE: /run/secrets/wazuh_indexer_password
+      WAZUH_INDEXER_CA_FILE: /run/secrets/wazuh_indexer_ca.pem
+      WAZUH_AGENT_MONITORING_ENABLED: "true"

@@ -1,4 +1,8 @@
-# Pilas Observabilidad — `deployment-kits` (laboratorio heredado)
+# Pilas Observabilidad — `deployment-kits`
+
+**Ruta activa para Ubuntu Server 26.04:** [Guía única de instalación limpia](GUIA_UNICA_UBUNTU26.md) y [directorio de despliegue](ubuntu-26.04/README.md). Incluye AWX, Wazuh, Prometheus, Grafana, Loki, Alloy, GeoIP y el código original de Security Triage Bot, conectado mediante el workflow de 19 Jobs. La ruta nueva todavía no ha sido probada de extremo a extremo en Ubuntu 26.04.
+
+## Laboratorio heredado Ubuntu 24.04
 
 Repositorio de automatización, configuración y verificación del **laboratorio antiguo** de seguridad y observabilidad. Es independiente de `infrastructure-platform` y sigue siendo la referencia operativa del entorno existente.
 

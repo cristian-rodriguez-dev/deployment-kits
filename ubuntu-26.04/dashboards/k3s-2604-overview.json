@@ -1,0 +1,38 @@
+{
+  "uid": "k3s-2604-observability",
+  "title": "K3s 26.04 - Observabilidad",
+  "tags": ["deployment-kits", "ubuntu-26.04", "k3s"],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "title": "Pods en ejecución", "type": "stat", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(kube_pod_status_phase{phase=\"Running\"})"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2, "title": "Réplicas disponibles", "type": "stat", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(kube_deployment_status_replicas_available)"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3, "title": "Volumen de logs por 5 min", "type": "timeseries", "gridPos": {"h": 9, "w": 24, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "loki-k3s-2604"},
+      "targets": [{"refId": "A", "expr": "sum(count_over_time({collector=\"alloy-kubernetes\"}[5m]))", "queryType": "range"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 4, "title": "Logs recientes de Kubernetes", "type": "logs", "gridPos": {"h": 10, "w": 24, "x": 0, "y": 17},
+      "datasource": {"type": "loki", "uid": "loki-k3s-2604"},
+      "targets": [{"refId": "A", "expr": "{collector=\"alloy-kubernetes\"}", "queryType": "range"}],
+      "options": {"showTime": true, "showLabels": false, "wrapLogMessage": true}
+    }
+  ]
+}

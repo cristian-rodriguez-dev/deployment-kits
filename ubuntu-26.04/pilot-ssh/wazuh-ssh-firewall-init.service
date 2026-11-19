@@ -1,0 +1,12 @@
+[Unit]
+Description=Wazuh SSH Active Response Firewall Initialization
+After=ufw.service
+Before=wazuh-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/wazuh-ssh-firewall-init.py
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

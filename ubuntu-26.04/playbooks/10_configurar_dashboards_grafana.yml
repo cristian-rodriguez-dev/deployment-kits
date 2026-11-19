@@ -1,0 +1,36 @@
+---
+- name: 10 | Dashboards Grafana como código
+  hosts: grafana-servers
+  become: true
+  gather_facts: true
+  vars:
+    var_grafana_admin_password: '{{ lookup(''ansible.builtin.env'',''VAR_GRAFANA_ADMIN_PASSWORD'') }}'
+    var_grafana_local_url: http://{{ var_grafana_bind_address | default('127.0.0.1') }}:{{ var_grafana_port }}
+    var_grafana_dashboard_api_base: '{{ var_grafana_local_url }}/apis/dashboard.grafana.app/v2/namespaces/default/dashboards'
+    var_grafana_dashboard_backup_dir: '{{ var_grafana_install_dir }}/backups/dashboards'
+    var_grafana_dashboards_json_path: '{{ playbook_dir }}/../../monitorizacion/dashboards'
+    var_grafana_dashboard_resources: []
+    var_grafana_dashboard_plan: []
+  tasks:
+  - name: Localizar dashboards JSON V2
+    ansible.builtin.set_fact:
+      dashboards_json: '{{ lookup("fileglob", var_grafana_dashboards_json_path ~ "/*.json", wantlist=True) | sort }}'
+  - name: Cargar dashboards versionados
+    ansible.builtin.set_fact:
+      var_grafana_dashboard_resources: '{{ var_grafana_dashboard_resources + [(lookup(''ansible.builtin.file'', item) | from_json)]
+        }}'
+    loop: '{{ dashboards_json }}'
+    no_log: true
+  - name: Comparar dashboards existentes
+    ansible.builtin.include_tasks: ../../monitorizacion/tasks/grafana/auditar_dashboard_v2.yml
+    loop: '{{ var_grafana_dashboard_resources }}'
+    loop_control:
+      loop_var: var_grafana_dashboard_resource
+      label: '{{ var_grafana_dashboard_resource.metadata.name }}'
+  - name: Importar o actualizar dashboards con backup
+    ansible.builtin.include_tasks: ../../monitorizacion/tasks/grafana/aplicar_dashboard_v2.yml
+    loop: '{{ var_grafana_dashboard_plan }}'
+    loop_control:
+      loop_var: var_grafana_dashboard_item
+      label: '{{ var_grafana_dashboard_item.resource.metadata.name }}'
+    when: var_grafana_dashboard_item.needs_change

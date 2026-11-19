@@ -1,0 +1,66 @@
+---
+- name: 16 | Validar conexiones sin generar alertas reales
+  hosts: wazuh-servers
+  become: true
+  gather_facts: false
+  vars:
+    triage_webhook_token: "{{ lookup('ansible.builtin.env', 'VAR_TRIAGE_WEBHOOK_TOKEN') }}"
+    triage_metrics_token: "{{ lookup('ansible.builtin.env', 'VAR_TRIAGE_METRICS_TOKEN') }}"
+    triage_base_url: http://127.0.0.1:18080
+  tasks:
+    - name: Comprobar FastAPI y su almacén SQLite
+      ansible.builtin.uri:
+        url: "{{ triage_base_url }}/health"
+        status_code: 200
+        return_content: true
+      register: triage_health
+      changed_when: false
+    - name: Comprobar estado saludable
+      ansible.builtin.assert:
+        that: triage_health.json.status == 'ok'
+
+    - name: Comprobar que la autenticación de métricas funciona
+      ansible.builtin.uri:
+        url: "{{ triage_base_url }}/internal/metrics"
+        status_code: 200
+        headers:
+          Authorization: "Bearer {{ triage_metrics_token }}"
+        return_content: true
+      register: triage_metrics_response
+      no_log: true
+      changed_when: false
+
+    - name: Validar que las métricas del bot son legibles
+      ansible.builtin.assert:
+        that: "'security_triage_' in triage_metrics_response.content"
+      no_log: true
+
+    - name: Confirmar script y token dentro del Manager
+      ansible.builtin.command:
+        argv: [docker, compose, -p, "{{ var_wazuh_project_name }}", -f, docker-compose.yml, -f, compose.credentials.yml, -f, compose.triage.yml, exec, -T, wazuh.manager, test, -x, /var/ossec/integrations/custom-security-triage]
+        chdir: "{{ var_wazuh_install_dir }}/single-node"
+      changed_when: false
+
+    - name: Confirmar red de métricas del contenedor Prometheus
+      ansible.builtin.command:
+        argv: [docker, network, inspect, triage-metrics-private]
+      register: triage_network
+      changed_when: false
+      no_log: true
+
+    - name: Confirmar target en Prometheus
+      ansible.builtin.uri:
+        url: "http://{{ var_prometheus_bind_address | default('127.0.0.1') }}:{{ var_prometheus_port }}/api/v1/query?query=up%7Bjob%3D%22security-triage-bot%22%7D"
+        return_content: true
+        status_code: 200
+      register: triage_prom_query
+      changed_when: false
+    - name: Exigir target UP
+      ansible.builtin.assert:
+        that:
+          - triage_prom_query.json.data.result | length == 1
+          - triage_prom_query.json.data.result[0].value[1] == '1'
+
+    - name: Resumen de alcance de la validación
+      ansible.builtin.debug:
+        msg: 'Bot OK, endpoint de métricas OK, script Wazuh presente, target Prometheus UP. Validar aparte una alerta Wazuh real y notificaciones a destinatarios de prueba autorizados.'

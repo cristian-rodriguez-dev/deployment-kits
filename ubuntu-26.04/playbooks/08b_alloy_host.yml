@@ -1,0 +1,24 @@
+---
+- name: 08B | Preparar variables de Alloy Host para Loki local
+  hosts: prometheus-servers
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Localizar gateway Loki en K3s
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, logging, get, service, loki-gateway, -o, 'jsonpath={.spec.clusterIP}']
+      register: dk_loki_ip
+      changed_when: false
+      failed_when: dk_loki_ip.rc != 0 or dk_loki_ip.stdout | length == 0
+    - name: Preparar configuración original Alloy Host
+      ansible.builtin.set_fact:
+        var_alloy_host_enabled: true
+        var_alloy_target_hosts: prometheus-servers
+        var_alloy_host_name: "{{ var_prometheus_local_name }}"
+        var_alloy_cluster_name: "{{ var_ubuntu26_cluster_name }}"
+        var_observability_environment: "{{ var_observability_environment | default('production') }}"
+        var_alloy_host_loki_url: "http://{{ dk_loki_ip.stdout }}/loki/api/v1/push"
+        var_alloy_department: "{{ var_prometheus_local_department }}"
+        var_alloy_inventory_name: "{{ inventory_hostname }}"
+        var_alloy_extra_journal_enabled: true
+- import_playbook: ../../monitorizacion/playbooks/instalar_alloy_host.yml

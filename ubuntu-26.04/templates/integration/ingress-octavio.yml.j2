@@ -1,0 +1,168 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dk-grafana-host
+  namespace: monitoring
+spec:
+  ports:
+    - name: web
+      protocol: TCP
+      port: {{ var_grafana_port }}
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: dk-grafana-host-1
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: dk-grafana-host
+addressType: IPv4
+ports:
+  - name: web
+    protocol: TCP
+    port: {{ var_grafana_port }}
+endpoints:
+  - addresses: [{{ var_observability_access_ip | to_json }}]
+    conditions:
+      ready: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dk-prometheus-host
+  namespace: monitoring
+spec:
+  ports:
+    - name: web
+      protocol: TCP
+      port: {{ var_prometheus_port }}
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: dk-prometheus-host-1
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: dk-prometheus-host
+addressType: IPv4
+ports:
+  - name: web
+    protocol: TCP
+    port: {{ var_prometheus_port }}
+endpoints:
+  - addresses: [{{ var_observability_access_ip | to_json }}]
+    conditions:
+      ready: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dk-wazuh-host
+  namespace: monitoring
+spec:
+  ports:
+    - name: websecure
+      protocol: TCP
+      port: {{ var_wazuh_dashboard_port }}
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: dk-wazuh-host-1
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: dk-wazuh-host
+addressType: IPv4
+ports:
+  - name: websecure
+    protocol: TCP
+    port: {{ var_wazuh_dashboard_port }}
+endpoints:
+  - addresses: [{{ var_observability_access_ip | to_json }}]
+    conditions:
+      ready: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: dk-wazuh-backend
+  namespace: monitoring
+spec:
+  insecureSkipVerify: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: dk-prometheus-auth
+  namespace: monitoring
+spec:
+  basicAuth:
+    secret: dk-prometheus-users
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: dk-grafana
+  namespace: monitoring
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`grafana.octavio.internal`)
+      kind: Rule
+      services:
+        - name: dk-grafana-host
+          port: {{ var_grafana_port }}
+  tls:
+    secretName: dk-octavio-internal-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: dk-prometheus
+  namespace: monitoring
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`prometheus.octavio.internal`)
+      kind: Rule
+      middlewares:
+        - name: dk-prometheus-auth
+      services:
+        - name: dk-prometheus-host
+          port: {{ var_prometheus_port }}
+  tls:
+    secretName: dk-octavio-internal-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: dk-wazuh
+  namespace: monitoring
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`wazuh.octavio.internal`)
+      kind: Rule
+      services:
+        - name: dk-wazuh-host
+          port: {{ var_wazuh_dashboard_port }}
+          scheme: https
+          serversTransport: dk-wazuh-backend
+  tls:
+    secretName: dk-octavio-internal-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: dk-awx
+  namespace: awx
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`awx.octavio.internal`)
+      kind: Rule
+      services:
+        - name: awx-service
+          port: 80
+  tls:
+    secretName: dk-octavio-internal-tls

@@ -1,0 +1,72 @@
+- name: 06 | Wazuh Agent y Node Exporter
+  hosts: monitoring-agents
+  gather_facts: true
+  become: true
+  serial: 1
+  vars:
+    agent_name: '{{ var_wazuh_agent_name | default(inventory_hostname) }}'
+    manager_ip: '{{ var_wazuh_manager_ip | default(hostvars[(groups["wazuh-servers"] | first)].ansible_host | default(groups["wazuh-servers"]
+      | first)) }}'
+    node_bind: '{{ var_ubuntu26_node_bind_ip | default(ansible_host | default(ansible_facts.default_ipv4.address)) }}'
+    node_port: '{{ var_node_exporter_port | default(9100) }}'
+    agent_version: '{{ var_wazuh_agent_version | default(var_wazuh_version ~ "-1") }}'
+  tasks:
+  - name: Instalar dependencias APT agentes
+    ansible.builtin.apt:
+      name:
+      - ca-certificates
+      - gnupg
+      - python3-apt
+      state: present
+      update_cache: true
+      cache_valid_time: 3600
+  - name: Descargar clave Wazuh
+    ansible.builtin.get_url:
+      url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+      dest: /usr/share/keyrings/wazuh-agent.asc
+      mode: '0644'
+  - name: Configurar repositorio Wazuh 4.x
+    ansible.builtin.apt_repository:
+      repo: deb [signed-by=/usr/share/keyrings/wazuh-agent.asc] https://packages.wazuh.com/4.x/apt/ stable main
+      filename: wazuh-agent
+      state: present
+      update_cache: true
+  - name: Instalar Wazuh Agent con IP de Manager
+    ansible.builtin.apt:
+      name: wazuh-agent={{ agent_version }}
+      state: present
+      install_recommends: false
+    environment:
+      WAZUH_MANAGER: '{{ manager_ip }}'
+      WAZUH_REGISTRATION_SERVER: '{{ manager_ip }}'
+      WAZUH_AGENT_NAME: '{{ agent_name }}'
+      WAZUH_REGISTRATION_PASSWORD: '{{ lookup(''ansible.builtin.env'', ''VAR_WAZUH_REGISTRATION_PASSWORD'') }}'
+    no_log: true
+  - name: Instalar Node Exporter Ubuntu
+    ansible.builtin.apt:
+      name: prometheus-node-exporter
+      state: present
+      install_recommends: false
+  - name: Escuchar Node Exporter en IP del agente
+    ansible.builtin.lineinfile:
+      path: /etc/default/prometheus-node-exporter
+      regexp: ^ARGS=
+      line: ARGS="--web.listen-address={{ node_bind }}:{{ node_port }}"
+      create: true
+      mode: '0644'
+    notify: Reiniciar Node Exporter
+  - name: Activar agente Wazuh
+    ansible.builtin.systemd_service:
+      name: wazuh-agent
+      state: started
+      enabled: true
+  - name: Activar Node Exporter
+    ansible.builtin.systemd_service:
+      name: prometheus-node-exporter
+      state: started
+      enabled: true
+  handlers:
+  - name: Reiniciar Node Exporter
+    ansible.builtin.systemd_service:
+      name: prometheus-node-exporter
+      state: restarted

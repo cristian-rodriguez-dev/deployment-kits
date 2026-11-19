@@ -1,0 +1,7 @@
+- job_name: security-triage-bot
+  metrics_path: /internal/metrics
+  authorization:
+    type: Bearer
+    credentials_file: /etc/prometheus/triage_metrics_token
+  static_configs:
+    - targets: [triage-metrics:8080]

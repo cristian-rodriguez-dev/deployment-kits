@@ -1,0 +1,11 @@
+services:
+  triage-bot:
+    networks:
+      triage_metrics:
+        aliases:
+          - triage-metrics
+
+networks:
+  triage_metrics:
+    external: true
+    name: triage-metrics-private

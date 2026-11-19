@@ -1,0 +1,69 @@
+---
+var_wazuh_install_dir: /opt/wazuh-docker
+var_wazuh_project_name: wazuh
+var_wazuh_version: '4.14.8'
+var_wazuh_access_group: root
+var_wazuh_dashboard_port: 5601
+var_wazuh_dashboard_timezone: Europe/Madrid
+var_wazuh_dashboard_dark_mode: true
+var_prometheus_install_dir: /opt/prometheus
+var_prometheus_project_name: prometheus
+var_monitorizacion_network: monitorizacion
+var_prometheus_image: prom/prometheus:v3.15.0
+var_node_exporter_image: prom/node-exporter:v1.12.1
+var_prometheus_bind_address: "{{ var_observability_access_ip }}"
+var_prometheus_port: 9090
+var_node_exporter_port: 9100
+var_prometheus_retention: 15d
+var_prometheus_scrape_interval: 15s
+var_prometheus_local_name: servidor-ejemplo
+var_prometheus_local_department: Departamento-ejemplo
+var_grafana_install_dir: /opt/grafana
+var_grafana_project_name: grafana
+var_grafana_image: grafana/grafana:13.2.3
+var_grafana_bind_address: "{{ var_observability_access_ip }}"
+var_grafana_port: 3000
+var_grafana_admin_user: admin
+var_grafana_admin_email: admin@example.invalid
+var_ubuntu26_k3s_version: 'v1.34.9+k3s1'
+var_ubuntu26_cluster_name: observabilidad
+var_ubuntu26_ksm_chart_version: '9.0.0'
+var_ubuntu26_loki_chart_version: '21.2.3'
+var_ubuntu26_alloy_chart_version: '1.15.0'
+var_ubuntu26_loki_pvc_size: 10Gi
+
+var_cadvisor_image: ghcr.io/google/cadvisor:v0.60.6
+var_observability_access_ip: "{{ ansible_host }}"
+var_ubuntu26_k3s_private_ip: "{{ ansible_host }}"
+var_ubuntu26_k3s_node_name: REEMPLAZAR_HOSTNAME_REAL_K3S
+var_observability_environment: production
+var_octavio_tls_cert_path: /etc/deployment-kits/tls/octavio.internal.crt
+var_octavio_tls_key_path: /etc/deployment-kits/tls/octavio.internal.key
+var_octavio_prometheus_htpasswd_path: /etc/deployment-kits/tls/prometheus-users
+
+var_triage_bot_install_dir: /opt/security-triage-bot
+var_triage_mail_enabled: false
+var_triage_telegram_enabled: false
+var_triage_ai_enabled: false
+var_triage_cross_source_enabled: false
+var_triage_wazuh_temporal_sequence_enabled: false
+var_triage_incident_grouping_enabled: false
+var_triage_group_evolution_enabled: false
+var_triage_ai_real_events_enabled: false
+var_triage_ai_wazuh_metadata_context_enabled: false
+var_triage_smtp_host: ''
+var_triage_smtp_port: 465
+var_triage_smtp_security: ssl
+var_triage_smtp_user: ''
+var_triage_mail_from: ''
+var_triage_mail_to: ''
+var_triage_dashboard_url: ''
+
+# Reglas originales en staging; no envían mensajes ni requieren destinatarios.
+var_grafana_alerting_restore_mode: stage
+# Solo se usa si la carpeta UID original no existe en el Grafana nuevo.
+var_grafana_alerting_folder_title: Infrastructure
+# La activación real necesita contactos privados y autorización explícita.
+var_grafana_alerting_authorize_notifications: false
+
+# El puente Traefik-Wazuh utiliza la configuración original de Git y el gateway Loki descubierto por K3s.

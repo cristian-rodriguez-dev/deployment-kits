@@ -1,0 +1,95 @@
+---
+- name: 11 | GeoIP sobre pipeline existente de Wazuh
+  hosts: wazuh-servers
+  become: true
+  gather_facts: false
+  vars:
+    geoip_id: "{{ var_wazuh_geoip_pipeline | default('filebeat-7.10.2-wazuh-alerts-pipeline') }}"
+    geoip_url: "https://127.0.0.1:9200/_ingest/pipeline/{{ geoip_id }}"
+    geoip_pwd: "{{ lookup('ansible.builtin.env', 'VAR_WAZUH_ADMIN_PASSWORD') }}"
+  tasks:
+    - name: Exigir credenciales del Indexer
+      ansible.builtin.assert:
+        that:
+          - geoip_pwd | length >= 8
+      no_log: true
+    - name: Leer pipeline original
+      ansible.builtin.uri:
+        url: "{{ geoip_url }}"
+        url_username: admin
+        url_password: "{{ geoip_pwd }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code: 200
+        return_content: true
+      register: geoip_read
+      retries: 20
+      delay: 6
+      until: geoip_read.status | default(0) == 200
+      no_log: true
+    - name: Preparar procesadores conservando la definición existente
+      ansible.builtin.set_fact:
+        geoip_original: "{{ geoip_read.json[geoip_id] }}"
+        geoip_processor:
+          geoip:
+            field: data.srcip
+            target_field: GeoLocation
+            ignore_missing: true
+      no_log: true
+    - name: Comprobar si existe el enriquecimiento exacto
+      ansible.builtin.set_fact:
+        geoip_present: >-
+          {{ (geoip_original.processors | default([])
+              | selectattr('geoip', 'defined')
+              | map(attribute='geoip')
+              | selectattr('field', 'equalto', 'data.srcip')
+              | selectattr('target_field', 'equalto', 'GeoLocation')
+              | list | length) > 0 }}
+      no_log: true
+    - name: Respaldar pipeline antes del primer cambio
+      ansible.builtin.copy:
+        dest: /root/wazuh-geoip-pipeline-before.json
+        content: "{{ geoip_original | to_nice_json }}
+"
+        mode: '0600'
+        force: false
+      when: not geoip_present
+      no_log: true
+    - name: Añadir GeoIP al pipeline sin alterar los demás procesadores
+      ansible.builtin.uri:
+        url: "{{ geoip_url }}"
+        method: PUT
+        url_username: admin
+        url_password: "{{ geoip_pwd }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body: "{{ geoip_original | combine({'processors': geoip_original.processors + [geoip_processor]}) }}"
+        status_code: 200
+      when: not geoip_present
+      no_log: true
+    - name: Comprobar generación GeoLocation
+      ansible.builtin.uri:
+        url: "{{ geoip_url | regex_replace('/_ingest/pipeline/.*$', '/_ingest/pipeline/_simulate') }}"
+        method: POST
+        url_username: admin
+        url_password: "{{ geoip_pwd }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          pipeline: "{{ geoip_original | combine({'processors': geoip_original.processors + ([geoip_processor] if not geoip_present else [])}) }}"
+          docs:
+            - _source:
+                message: >-
+                  {{ {'timestamp': '2026-11-11T09:00:00.000Z',
+                      'rule': {'id': '5763', 'level': 10},
+                      'data': {'srcip': '8.8.8.8'}} | to_json }}
+        status_code: 200
+      register: geoip_simulation
+      no_log: true
+    - name: Confirmar coordenadas en simulación
+      ansible.builtin.assert:
+        that:
+          - geoip_simulation.json.docs[0].doc._source.GeoLocation.location is defined
+        fail_msg: 'GeoIP no devuelve localización. Revisar procesador, plugin y base de datos GeoIP.'

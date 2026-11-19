@@ -1,0 +1,23 @@
+- name: 07 | Targets desde inventario AWX
+  hosts: prometheus-servers
+  gather_facts: false
+  become: true
+  vars:
+    target_file: '{{ var_prometheus_install_dir }}/prometheus/targets/node-exporters.yml'
+    agent_hosts: '{{ groups.get("monitoring-agents", []) | sort }}'
+  tasks:
+  - name: Crear lista de targets a partir de inventario AWX
+    ansible.builtin.set_fact:
+      targets_data: '{{ (targets_data | default([])) + [{''targets'': [(hostvars[item][''var_ubuntu26_node_bind_ip''] | default(hostvars[item][''ansible_host'']
+        | default(item))) ~ '':'' ~ (hostvars[item][''var_node_exporter_port''] | default(var_node_exporter_port) | string)],
+        ''labels'': {''nodename'': (hostvars[item][''var_ubuntu26_nodename''] | default(item)), ''departamento'': (hostvars[item][''var_ubuntu26_departamento'']
+        | default(''General''))}}] }}'
+    loop: '{{ agent_hosts }}'
+  - name: Publicar targets (sin reiniciar Prometheus)
+    ansible.builtin.copy:
+      dest: '{{ target_file }}'
+      content: '{{ targets_data | default([]) | to_nice_json(indent=2) }}
+
+        '
+      mode: '0644'
+      backup: true

@@ -1,0 +1,302 @@
+{
+  "schema_version": 1,
+  "target_os": "Ubuntu 26.04 LTS",
+  "awx_tested": false,
+  "name": "26.04 - Produccion un host",
+  "description": "Instalación central monohost: Docker, Wazuh, Prometheus, Grafana, K3s, Loki/Alloy, GeoIP, puente Traefik-Loki-Wazuh, TLS, Security Triage original y métricas privadas. Alerting real recuperado: 10 reglas en stage pausado; para notificaciones reales faltan ajustes privados y autorización. Active Response requiere autorización independiente.",
+  "organization": "Default",
+  "inventory": "Ubuntu 26.04 - Instalacion limpia",
+  "project": "deployment-kits",
+  "credentials": {
+    "machine": "SSH - Ubuntu 26.04",
+    "wazuh_secrets": "Wazuh - Credenciales 26.04",
+    "grafana_secrets": "Grafana - Admin 26.04",
+    "triage_secrets": "Triage - Secretos 26.04"
+  },
+  "nodes": [
+    {
+      "id": "00",
+      "type": "job",
+      "name": "26.04 - 00 Preflight",
+      "playbook": "ubuntu-26.04/playbooks/00_preflight.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [],
+      "extra_data": {}
+    },
+    {
+      "id": "01",
+      "type": "job",
+      "name": "26.04 - 01 Instalar Docker",
+      "playbook": "ubuntu-26.04/playbooks/01_instalar_docker.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "00"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "02",
+      "type": "job",
+      "name": "26.04 - 02 Instalar Wazuh",
+      "playbook": "ubuntu-26.04/playbooks/02_instalar_wazuh.yml",
+      "credentials": [
+        "machine",
+        "wazuh_secrets"
+      ],
+      "after": [
+        "01"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "03",
+      "type": "job",
+      "name": "26.04 - 03 Configurar Wazuh",
+      "playbook": "ubuntu-26.04/playbooks/03_configurar_wazuh.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "02"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "04",
+      "type": "job",
+      "name": "26.04 - 04 Instalar Prometheus",
+      "playbook": "ubuntu-26.04/playbooks/04_instalar_prometheus.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "03"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "05",
+      "type": "job",
+      "name": "26.04 - 05 Instalar Grafana",
+      "playbook": "ubuntu-26.04/playbooks/05_instalar_grafana.yml",
+      "credentials": [
+        "machine",
+        "grafana_secrets",
+        "wazuh_secrets"
+      ],
+      "after": [
+        "04"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "08",
+      "type": "job",
+      "name": "26.04 - 08 Observabilidad K3s",
+      "playbook": "ubuntu-26.04/playbooks/08_observabilidad_k3s.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "05"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "08B",
+      "type": "job",
+      "name": "26.04 - 08B Alloy Host",
+      "playbook": "ubuntu-26.04/playbooks/08b_alloy_host.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "08"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "09A",
+      "type": "job",
+      "name": "26.04 - 09A Acceso limitado K3s",
+      "playbook": "ubuntu-26.04/playbooks/09a_preparar_acceso_k3s.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "08B"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "09B",
+      "type": "job",
+      "name": "26.04 - 09B K3s y Prometheus",
+      "playbook": "ubuntu-26.04/playbooks/09b_integrar_k3s_prometheus.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "09A"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "09D",
+      "type": "job",
+      "name": "26.04 - 09D cAdvisor Kubelet",
+      "playbook": "ubuntu-26.04/playbooks/09d_integrar_kubelet_cadvisor.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "09B"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "09C",
+      "type": "job",
+      "name": "26.04 - 09C Loki y Grafana",
+      "playbook": "ubuntu-26.04/playbooks/09c_integrar_loki_grafana.yml",
+      "credentials": [
+        "machine",
+        "grafana_secrets"
+      ],
+      "after": [
+        "09D"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "09E",
+      "type": "job",
+      "name": "26.04 - 09E Puente Traefik Loki Wazuh",
+      "playbook": "ubuntu-26.04/playbooks/09e_traefik_wazuh_bridge.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "09C"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "10",
+      "type": "job",
+      "name": "26.04 - 10 Dashboards originales",
+      "playbook": "ubuntu-26.04/playbooks/10_configurar_dashboards_grafana.yml",
+      "credentials": [
+        "machine",
+        "grafana_secrets"
+      ],
+      "after": [
+        "09E"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "11",
+      "type": "job",
+      "name": "26.04 - 11 GeoIP Wazuh",
+      "playbook": "ubuntu-26.04/playbooks/11_geoip_wazuh.yml",
+      "credentials": [
+        "machine",
+        "wazuh_secrets"
+      ],
+      "after": [
+        "10"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "12",
+      "type": "job",
+      "name": "26.04 - 12 HTTPS octavio.internal",
+      "playbook": "ubuntu-26.04/playbooks/12_acceso_https_octavio.yml",
+      "credentials": [
+        "machine"
+      ],
+      "after": [
+        "11"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "13",
+      "type": "job",
+      "name": "26.04 - 13 Validacion nucleo",
+      "playbook": "ubuntu-26.04/playbooks/13_validar_nucleo.yml",
+      "credentials": [
+        "machine",
+        "grafana_secrets",
+        "wazuh_secrets"
+      ],
+      "after": [
+        "12"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "14",
+      "type": "job",
+      "name": "26.04 - 14 Triage Bot original",
+      "playbook": "ubuntu-26.04/playbooks/14_instalar_triage_bot.yml",
+      "credentials": [
+        "machine",
+        "wazuh_secrets",
+        "triage_secrets"
+      ],
+      "after": [
+        "13"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "15",
+      "type": "job",
+      "name": "26.04 - 15 Metricas Security Triage",
+      "playbook": "ubuntu-26.04/playbooks/15_integrar_metricas_triage.yml",
+      "credentials": [
+        "machine",
+        "triage_secrets"
+      ],
+      "after": [
+        "14"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "16",
+      "type": "job",
+      "name": "26.04 - 16 Validar Triage",
+      "playbook": "ubuntu-26.04/playbooks/16_validar_triage.yml",
+      "credentials": [
+        "machine",
+        "triage_secrets"
+      ],
+      "after": [
+        "15"
+      ],
+      "extra_data": {}
+    },
+    {
+      "id": "18",
+      "type": "job",
+      "name": "26.04 - 18 Grafana Alerting original (seguro)",
+      "playbook": "ubuntu-26.04/playbooks/18_grafana_alerting_original.yml",
+      "credentials": [
+        "machine",
+        "grafana_secrets"
+      ],
+      "after": [
+        "16"
+      ],
+      "extra_data": {}
+    }
+  ]
+}

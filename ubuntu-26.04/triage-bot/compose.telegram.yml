@@ -1,0 +1,21 @@
+# Docker Compose overlay. Cargar junto a compose.yml del bot existente.
+# No cambia, reinicia ni reconstruye triage-bot o mail-notifier.
+services:
+  telegram-notifier:
+    build: .
+    command: ["python", "-u", "-m", "app.telegram_notifier"]
+    container_name: security-triage-telegram
+    restart: unless-stopped
+    env_file: .env.telegram
+    volumes:
+      - triage-data:/data
+    mem_limit: 96m
+    cpus: 0.25
+    pids_limit: 32
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

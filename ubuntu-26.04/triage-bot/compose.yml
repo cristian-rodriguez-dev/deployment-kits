@@ -1,0 +1,38 @@
+services:
+  triage-bot:
+    build: .
+    container_name: security-triage-bot
+    restart: unless-stopped
+
+    env_file: .env
+
+    ports:
+      - "127.0.0.1:18080:8080"
+
+    volumes:
+      - triage-data:/data
+
+    networks:
+      default: {}
+      triage-webhooks: {}
+
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    read_only: true
+
+    tmpfs:
+      - /tmp:size=16m
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+volumes:
+  triage-data:
+
+networks:
+  triage-webhooks:
+    external: true

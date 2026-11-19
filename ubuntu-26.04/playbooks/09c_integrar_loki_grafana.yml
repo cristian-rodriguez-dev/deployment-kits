@@ -1,0 +1,83 @@
+---
+- name: 09C | Loki en Grafana (opcional, pendiente de compatibilidad GET)
+  hosts: grafana-servers
+  become: true
+  gather_facts: false
+  vars:
+    k3s_host: '{{ groups[''k3s-servers''] | first }}'
+    k3s_address: '{{ hostvars[k3s_host].var_ubuntu26_k3s_private_ip | default(hostvars[k3s_host].ansible_host | default(k3s_host))
+      }}'
+    grafana_url: http://{{ var_grafana_bind_address | default('127.0.0.1') }}:{{ var_grafana_port }}
+    loki_url: https://{{ k3s_address }}:6443/api/v1/namespaces/logging/services/http:loki-gateway:80/proxy
+    loki_uid: cg2sr4544ary8b
+    dashboard_uid: k3s-2604-observability
+    dashboard: '{{ lookup(''file'', ''../dashboards/k3s-2604-overview.json'') | from_json }}'
+  tasks:
+  - name: Leer contraseña Grafana
+    ansible.builtin.slurp:
+      src: '{{ var_grafana_install_dir }}/secrets/admin_password'
+    register: grafana_admin_password
+    no_log: true
+  - name: Leer CA K3s
+    ansible.builtin.slurp:
+      src: /var/lib/rancher/k3s/server/tls/server-ca.crt
+    delegate_to: '{{ k3s_host }}'
+    register: k3s_ca
+    no_log: true
+  - name: Leer token K3s
+    ansible.builtin.command:
+      argv:
+      - k3s
+      - kubectl
+      - -n
+      - monitoring
+      - get
+      - secret
+      - dk-observability-reader-token
+      - -o=jsonpath={.data.token}
+    delegate_to: '{{ k3s_host }}'
+    register: k3s_token
+    changed_when: false
+    no_log: true
+    until: (k3s_token.rc == 0) and (k3s_token.stdout | length > 20)
+    retries: 12
+    delay: 5
+  - name: Consultar datasource Loki
+    ansible.builtin.uri:
+      url: '{{ grafana_url }}/api/datasources/uid/{{ loki_uid }}'
+      url_username: '{{ var_grafana_admin_user }}'
+      url_password: '{{ grafana_admin_password.content | b64decode | trim }}'
+      force_basic_auth: true
+      status_code:
+      - 200
+      - 404
+    register: current_loki
+    changed_when: false
+    no_log: true
+  - name: Crear datasource Loki si falta
+    ansible.builtin.uri:
+      url: '{{ grafana_url }}/api/datasources'
+      method: POST
+      url_username: '{{ var_grafana_admin_user }}'
+      url_password: '{{ grafana_admin_password.content | b64decode | trim }}'
+      force_basic_auth: true
+      body_format: json
+      status_code:
+      - 200
+      - 201
+      body:
+        name: Loki K3s
+        uid: '{{ loki_uid }}'
+        type: loki
+        access: proxy
+        url: '{{ loki_url }}'
+        isDefault: false
+        jsonData:
+          httpHeaderName1: Authorization
+          tlsAuthWithCACert: true
+          tlsSkipVerify: false
+        secureJsonData:
+          httpHeaderValue1: Bearer {{ k3s_token.stdout | b64decode }}
+          tlsCACert: '{{ k3s_ca.content | b64decode }}'
+    when: current_loki.status == 404
+    no_log: true

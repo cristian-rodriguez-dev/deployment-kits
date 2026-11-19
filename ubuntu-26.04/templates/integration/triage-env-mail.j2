@@ -1,0 +1,10 @@
+DB_PATH=/data/incidents.db
+MAIL_ENABLED={{ (var_triage_mail_enabled | default(false) | bool) | ternary('true', 'false') }}
+SMTP_HOST={{ (var_triage_smtp_host | default('')) | to_json }}
+SMTP_PORT={{ var_triage_smtp_port | default(465) }}
+SMTP_SECURITY={{ (var_triage_smtp_security | default('ssl')) | to_json }}
+SMTP_USER={{ (var_triage_smtp_user | default('')) | to_json }}
+SMTP_PASSWORD={{ triage_smtp_password | to_json }}
+MAIL_FROM={{ (var_triage_mail_from | default('')) | to_json }}
+MAIL_TO={{ (var_triage_mail_to | default('')) | to_json }}
+DASHBOARD_URL={{ (var_triage_dashboard_url | default('')) | to_json }}

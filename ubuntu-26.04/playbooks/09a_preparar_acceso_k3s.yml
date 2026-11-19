@@ -1,0 +1,21 @@
+---
+- name: 09A | Acceso mínimo K3s
+  hosts: k3s-servers
+  become: true
+  gather_facts: false
+  tasks:
+  - name: Copiar RBAC de acceso limitado
+    ansible.builtin.copy:
+      src: ../templates/integration/k3s-api-proxy-rbac.yml
+      dest: /root/dk-observability-rbac.yml
+      mode: '0600'
+  - name: Aplicar RBAC
+    ansible.builtin.command:
+      argv:
+      - k3s
+      - kubectl
+      - apply
+      - -f
+      - /root/dk-observability-rbac.yml
+    register: rbac_apply
+    changed_when: '''created'' in rbac_apply.stdout or ''configured'' in rbac_apply.stdout'

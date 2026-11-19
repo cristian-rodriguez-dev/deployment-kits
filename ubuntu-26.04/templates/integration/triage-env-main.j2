@@ -1,0 +1,26 @@
+DB_PATH=/data/incidents.db
+WEBHOOK_TOKEN={{ triage_webhook_token | to_json }}
+AI_ENABLED={{ (var_triage_ai_enabled | default(false) | bool) | ternary('true', 'false') }}
+AI_REAL_EVENTS_ENABLED={{ (var_triage_ai_real_events_enabled | default(false) | bool) | ternary('true', 'false') }}
+GEMINI_API_KEY={{ triage_gemini_key | to_json }}
+{% if var_triage_gemini_model | default('') %}
+GEMINI_MODEL={{ var_triage_gemini_model | to_json }}
+{% endif %}
+WAZUH_INDEXER_ENABLED=true
+WAZUH_METADATA_ENABLED=true
+CROSS_SOURCE_CORRELATION_ENABLED={{ (var_triage_cross_source_enabled | default(false) | bool) | ternary('true', 'false') }}
+WAZUH_TEMPORAL_SEQUENCE_ENABLED={{ (var_triage_wazuh_temporal_sequence_enabled | default(false) | bool) | ternary('true', 'false') }}
+INCIDENT_GROUPING_ENABLED={{ (var_triage_incident_grouping_enabled | default(false) | bool) | ternary('true', 'false') }}
+GROUP_EVOLUTION_ENABLED={{ (var_triage_group_evolution_enabled | default(false) | bool) | ternary('true', 'false') }}
+WAZUH_AGENT_MONITORING_ENABLED=true
+PROMETHEUS_ENRICH_ENABLED=true
+LOKI_ENRICH_ENABLED=true
+LOKI_TIMELINE_ENABLED=true
+OBSERVABILITY_METRICS_ENABLED=true
+OBSERVABILITY_METRICS_TOKEN={{ triage_metrics_token | to_json }}
+AI_WAZUH_METADATA_CONTEXT_ENABLED={{ (var_triage_ai_wazuh_metadata_context_enabled | default(false) | bool) | ternary('true', 'false') }}
+AI_PROMETHEUS_CONTEXT_ENABLED={{ (var_triage_ai_prometheus_context_enabled | default(false) | bool) | ternary('true', 'false') }}
+AI_LOKI_CONTEXT_ENABLED={{ (var_triage_ai_loki_context_enabled | default(false) | bool) | ternary('true', 'false') }}
+AI_LOKI_TIMELINE_CONTEXT_ENABLED={{ (var_triage_ai_loki_timeline_context_enabled | default(false) | bool) | ternary('true', 'false') }}
+AI_SHADOW_DECISIONS_ENABLED={{ (var_triage_shadow_decisions_enabled | default(false) | bool) | ternary('true', 'false') }}
+AI_MULTIAXIS_SHADOW_ENABLED={{ (var_triage_multiaxis_shadow_enabled | default(false) | bool) | ternary('true', 'false') }}

@@ -1,0 +1,77 @@
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: alloy
+  namespace: kube-system
+spec:
+  repo: https://grafana.github.io/helm-charts
+  chart: alloy
+  version: {{ var_ubuntu26_alloy_chart_version | to_json }}
+  targetNamespace: monitoring
+  createNamespace: true
+  failurePolicy: abort
+  valuesContent: |-
+    alloy:
+      enableReporting: false
+      mounts:
+        varlog: false
+        dockercontainers: false
+      configMap:
+        create: true
+        content: |-
+          logging {
+            level = "info"
+          }
+          discovery.kubernetes "pods" {
+            role = "pod"
+          }
+          discovery.relabel "pod_labels" {
+            targets = discovery.kubernetes.pods.targets
+            rule {
+              source_labels = ["__meta_kubernetes_namespace"]
+              target_label = "namespace"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_name"]
+              target_label = "pod"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_container_name"]
+              target_label = "container"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_container_name"]
+              target_label = "app"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_node_name"]
+              target_label = "node"
+            }
+          }
+          loki.source.kubernetes "pods" {
+            targets = discovery.relabel.pod_labels.output
+            forward_to = [loki.write.cluster.receiver]
+          }
+          loki.write "cluster" {
+            external_labels = {
+              cluster = {{ var_ubuntu26_cluster_name | to_json }},
+              collector = "alloy-kubernetes",
+            }
+            endpoint {
+              url = "http://loki-gateway.logging.svc.cluster.local/loki/api/v1/push"
+            }
+          }
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 300m
+          memory: 512Mi
+    controller:
+      type: deployment
+      replicas: 1
+    service:
+      enabled: true
+      type: ClusterIP

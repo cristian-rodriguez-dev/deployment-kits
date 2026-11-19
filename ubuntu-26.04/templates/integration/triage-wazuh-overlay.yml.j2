@@ -1,0 +1,13 @@
+services:
+  wazuh.manager:
+    volumes:
+      - {{ (var_triage_bot_install_dir ~ '/wazuh/custom-security-triage:/var/ossec/integrations/custom-security-triage:ro') | to_json }}
+      - {{ (var_triage_bot_install_dir ~ '/.local-secrets/triage_webhook_token:/var/ossec/etc/triage-bot.token:ro') | to_json }}
+    networks:
+{% for network in triage_wazuh_manager_networks %}
+      - {{ network | to_json }}
+{% endfor %}
+networks:
+  triage-webhooks:
+    external: true
+    name: triage-webhooks

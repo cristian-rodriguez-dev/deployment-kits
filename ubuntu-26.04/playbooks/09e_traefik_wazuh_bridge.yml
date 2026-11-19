@@ -1,0 +1,242 @@
+---
+- name: 09E | Instalación limpia Traefik Loki Wazuh
+  hosts: wazuh-servers
+  become: true
+  gather_facts: false
+  vars:
+    bridge_stack: "{{ var_wazuh_install_dir }}/single-node"
+    bridge_container: "{{ var_wazuh_project_name }}-wazuh.manager-1"
+    bridge_source: "{{ playbook_dir }}/../../monitorizacion/integrations/traefik_wazuh_bridge"
+    bridge_manager_config: "{{ bridge_stack }}/config/wazuh_cluster/wazuh_manager.conf"
+    bridge_events: /srv/traefik-wazuh-bridge/events
+    bridge_output: /srv/traefik-wazuh-bridge/events/traefik-access.jsonl
+    bridge_rules_path: /var/ossec/etc/rules/traefik_rules.xml
+    bridge_localfile_block: |
+      <localfile>
+        <log_format>json</log_format>
+        <location>/var/ossec/traefik-bridge/traefik-access.jsonl</location>
+      </localfile>
+  tasks:
+    - name: Exigir host central compartido con K3s
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in groups['k3s-servers']
+        fail_msg: El puente solo se instala en el host central que ejecuta K3s y Wazuh
+
+    - name: Localizar Loki Gateway sin IP fija
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, logging, get, service, loki-gateway, -o, 'jsonpath={.spec.clusterIP}']
+      register: bridge_loki_ip
+      changed_when: false
+      failed_when: bridge_loki_ip.rc != 0 or bridge_loki_ip.stdout | trim | length == 0
+
+    - name: Preparar URL interna Loki
+      ansible.builtin.set_fact:
+        traefik_loki_url: "http://{{ bridge_loki_ip.stdout | trim }}:80"
+
+    - name: Verificar API de Loki accesible desde el host
+      ansible.builtin.uri:
+        url: "{{ traefik_loki_url }}/loki/api/v1/labels"
+        status_code: 200
+      register: bridge_loki_check
+      until: bridge_loki_check.status | default(0) == 200
+      retries: 10
+      delay: 5
+      changed_when: false
+
+    - name: Obtener GID Wazuh del Manager
+      ansible.builtin.command:
+        argv: [docker, exec, "{{ bridge_container }}", id, -g, wazuh]
+      register: bridge_wazuh_gid
+      changed_when: false
+
+    - name: Crear usuario de servicio sin login
+      ansible.builtin.user:
+        name: traefik-wazuh
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+        state: present
+
+    - name: Crear directorios de la integración
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - {path: /opt/traefik-wazuh-bridge, owner: root, group: root, mode: '0755'}
+        - {path: /etc/traefik-wazuh-bridge, owner: root, group: traefik-wazuh, mode: '0750'}
+        - {path: /var/lib/traefik-wazuh-bridge, owner: traefik-wazuh, group: traefik-wazuh, mode: '0700'}
+        - {path: /srv/traefik-wazuh-bridge, owner: root, group: root, mode: '0755'}
+        - {path: "{{ bridge_events }}", owner: traefik-wazuh, group: "{{ bridge_wazuh_gid.stdout | trim }}", mode: '2750'}
+
+    - name: Consultar JSONL existente sin tocar histórico
+      ansible.builtin.stat:
+        path: "{{ bridge_output }}"
+      register: bridge_jsonl_stat
+
+    - name: Crear JSONL vacío solo si falta
+      ansible.builtin.file:
+        path: "{{ bridge_output }}"
+        state: touch
+        owner: traefik-wazuh
+        group: "{{ bridge_wazuh_gid.stdout | trim }}"
+        mode: '0640'
+      when: not bridge_jsonl_stat.stat.exists
+
+    - name: Conservar script Python del puente original
+      ansible.builtin.copy:
+        src: "{{ bridge_source }}/bridge.py"
+        dest: /opt/traefik-wazuh-bridge/bridge.py
+        owner: root
+        group: root
+        mode: '0755'
+      register: bridge_script_copy
+
+    - name: Configurar origen Loki y parámetros originales
+      ansible.builtin.template:
+        src: ../templates/integration/traefik-bridge-config.json.j2
+        dest: /etc/traefik-wazuh-bridge/config.json
+        owner: root
+        group: traefik-wazuh
+        mode: '0640'
+      register: bridge_config_copy
+
+    - name: Validar consulta Loki del puente sin escribir eventos
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /opt/traefik-wazuh-bridge/bridge.py, --config, /etc/traefik-wazuh-bridge/config.json, --once, --dry-run]
+      become_user: traefik-wazuh
+      changed_when: false
+
+    - name: Leer estado anterior del puente
+      ansible.builtin.command:
+        argv: [systemctl, is-active, traefik-wazuh-bridge.service]
+      register: bridge_service_before
+      failed_when: false
+      changed_when: false
+
+    - name: Instalar servicio original systemd
+      ansible.builtin.copy:
+        src: "{{ bridge_source }}/traefik-wazuh-bridge.service"
+        dest: /etc/systemd/system/traefik-wazuh-bridge.service
+        owner: root
+        group: root
+        mode: '0644'
+      register: bridge_service_copy
+
+    - name: Registrar bind mount de solo lectura para Wazuh
+      ansible.builtin.copy:
+        src: ../templates/integration/traefik-wazuh-compose.yml
+        dest: "{{ bridge_stack }}/compose.traefik.yml"
+        owner: root
+        group: root
+        mode: '0644'
+      register: bridge_compose_copy
+
+    - name: Registrar localfile JSONL en configuración de origen del Manager
+      ansible.builtin.blockinfile:
+        path: "{{ bridge_manager_config }}"
+        marker: '<!-- {mark} deployment-kits-traefik-wazuh -->'
+        insertbefore: '</ossec_config>'
+        block: "{{ bridge_localfile_block }}"
+        backup: true
+      register: bridge_manager_config_copy
+
+    - name: Preparar copia local de reglas Wazuh
+      ansible.builtin.copy:
+        src: "{{ bridge_source }}/traefik_rules.xml"
+        dest: /opt/traefik-wazuh-bridge/traefik_rules.xml
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Obtener hash de reglas ya instaladas
+      ansible.builtin.command:
+        argv: [docker, exec, "{{ bridge_container }}", sha256sum, "{{ bridge_rules_path }}"]
+      register: bridge_existing_rules
+      failed_when: false
+      changed_when: false
+
+    - name: Comprobar reglas preexistentes antes de copiar
+      ansible.builtin.assert:
+        that:
+          - bridge_existing_rules.rc != 0 or bridge_existing_rules.stdout.split()[0] == '71954245f50c8768290bbb5149e5ba336e0733340693172808bf19654db12d32'
+        fail_msg: 'Reglas Traefik distintas: revisar manualmente antes de sobrescribir'
+
+    - name: Copiar reglas originales en primera instalación
+      ansible.builtin.command:
+        argv: [docker, cp, /opt/traefik-wazuh-bridge/traefik_rules.xml, "{{ bridge_container }}:{{ bridge_rules_path }}"]
+      when: bridge_existing_rules.rc != 0
+      register: bridge_rules_copy
+
+    - name: Detectar overlay existente del bot
+      ansible.builtin.stat:
+        path: "{{ bridge_stack }}/compose.triage.yml"
+      register: bridge_triage_overlay
+
+    - name: Validar configuración Compose con overlays existentes
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'compose', '-p', var_wazuh_project_name, '-f', 'docker-compose.yml', '-f', 'compose.credentials.yml'] + (['-f', 'compose.triage.yml'] if bridge_triage_overlay.stat.exists else []) + ['-f', 'compose.traefik.yml', 'config', '--quiet'] }}"
+        chdir: "{{ bridge_stack }}"
+      changed_when: false
+      no_log: true
+
+    - name: Aplicar Manager solo si cambian su montaje reglas o configuración
+      community.docker.docker_compose_v2:
+        project_src: "{{ bridge_stack }}"
+        project_name: "{{ var_wazuh_project_name }}"
+        files: "{{ ['docker-compose.yml', 'compose.credentials.yml'] + (['compose.triage.yml'] if bridge_triage_overlay.stat.exists else []) + ['compose.traefik.yml'] }}"
+        services: [wazuh.manager]
+        state: present
+        pull: missing
+        recreate: "{{ 'always' if (bridge_compose_copy.changed or bridge_manager_config_copy.changed or bridge_rules_copy.changed | default(false)) else 'auto' }}"
+      no_log: true
+
+    - name: Verificar montaje accesible desde Wazuh
+      ansible.builtin.command:
+        argv: [docker, exec, "{{ bridge_container }}", test, -r, /var/ossec/traefik-bridge/traefik-access.jsonl]
+      changed_when: false
+      register: bridge_manager_ready
+      until: bridge_manager_ready.rc == 0
+      retries: 20
+      delay: 5
+
+    - name: Confirmar localfile JSONL cargado en Manager
+      ansible.builtin.command:
+        argv: [docker, exec, "{{ bridge_container }}", grep, -F, /var/ossec/traefik-bridge/traefik-access.jsonl, /var/ossec/etc/ossec.conf]
+      changed_when: false
+      register: bridge_localfile_loaded
+      until: bridge_localfile_loaded.rc == 0
+      retries: 12
+      delay: 5
+
+    - name: Comprobar que las reglas del Manager coinciden con Git
+      ansible.builtin.command:
+        argv: [docker, exec, "{{ bridge_container }}", sha256sum, "{{ bridge_rules_path }}"]
+      register: bridge_rules_verify
+      changed_when: false
+      failed_when: bridge_rules_verify.rc != 0 or bridge_rules_verify.stdout.split()[0] != '71954245f50c8768290bbb5149e5ba336e0733340693172808bf19654db12d32'
+
+    - name: Levantar el puente sin borrar SQLite ni JSONL
+      ansible.builtin.systemd_service:
+        name: traefik-wazuh-bridge.service
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Reiniciar solo el puente si cambian código servicio o URL
+      ansible.builtin.systemd_service:
+        name: traefik-wazuh-bridge.service
+        state: restarted
+      when: bridge_service_before.rc == 0 and (bridge_script_copy.changed or bridge_service_copy.changed or bridge_config_copy.changed)
+
+    - name: Confirmar que el puente sigue activo
+      ansible.builtin.command:
+        argv: [systemctl, is-active, traefik-wazuh-bridge.service]
+      register: bridge_service_active
+      until: bridge_service_active.rc == 0 and bridge_service_active.stdout | trim == 'active'
+      retries: 5
+      delay: 2
+      changed_when: false

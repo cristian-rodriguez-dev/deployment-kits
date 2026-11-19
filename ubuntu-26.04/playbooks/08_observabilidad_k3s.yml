@@ -1,0 +1,90 @@
+---
+- name: 08 | Observabilidad en el K3s de AWX
+  hosts: k3s-servers
+  gather_facts: false
+  become: true
+  vars:
+    manifests_dir: /var/lib/rancher/k3s/server/manifests
+    charts:
+      - name: kube-state-metrics
+        template: k3s/kube-state-metrics.yaml.j2
+      - name: loki
+        template: k3s/loki.yaml.j2
+      - name: alloy
+        template: k3s/alloy.yaml.j2
+  tasks:
+    - name: Verificar clúster AWX existente
+      ansible.builtin.command:
+        argv:
+          - k3s
+          - kubectl
+          - -n
+          - awx
+          - get
+          - deployment
+          - awx-operator-controller-manager
+      changed_when: false
+
+    - name: Crear directorio de manifiestos
+      ansible.builtin.file:
+        path: '{{ manifests_dir }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Recuperar configuración del Traefik de K3s 24.04
+      ansible.builtin.copy:
+        src: ../templates/k3s/traefik-config.yaml
+        dest: "{{ manifests_dir }}/traefik-config.yaml"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Instalar charts de observabilidad
+      ansible.builtin.template:
+        src: '../templates/{{ item.template }}'
+        dest: '{{ manifests_dir }}/{{ item.name }}.yaml'
+        owner: root
+        group: root
+        mode: '0600'
+      loop: '{{ charts }}'
+
+    - name: Esperar kube-state-metrics y Alloy
+      ansible.builtin.command:
+        argv:
+          - k3s
+          - kubectl
+          - -n
+          - monitoring
+          - rollout
+          - status
+          - deployment/{{ item }}
+          - --timeout=600s
+      loop:
+        - kube-state-metrics
+        - alloy
+      register: rollout_result
+      until: rollout_result.rc == 0
+      retries: 8
+      delay: 15
+      changed_when: false
+
+    - name: Esperar a que Loki genere sus pods
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, logging, get, pods, -l, app.kubernetes.io/instance=loki, -o, name]
+      register: loki_pods
+      changed_when: false
+      until: loki_pods.rc == 0 and loki_pods.stdout | length > 0
+      retries: 40
+      delay: 15
+
+    - name: Esperar a que Loki esté listo
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, logging, wait, --for=condition=Ready, pod, -l, app.kubernetes.io/instance=loki, --timeout=600s]
+      changed_when: false
+
+    - name: Comprobar que existe el gateway de Loki
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, logging, get, svc, loki-gateway]
+      changed_when: false

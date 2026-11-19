@@ -1,0 +1,74 @@
+- name: 18 | Recuperar alerting original en modo seguro
+  hosts: grafana-servers
+  gather_facts: false
+  become: true
+  vars:
+    grafana_alerting_dir: "{{ var_grafana_install_dir }}/alerting-original"
+    grafana_alerting_mode: "{{ var_grafana_alerting_restore_mode | default('stage') }}"
+  tasks:
+    - name: Validar modo de restauración
+      ansible.builtin.assert:
+        that:
+          - grafana_alerting_mode in ['stage', 'activate']
+          - var_grafana_port | int > 0
+          - var_grafana_admin_user | length > 0
+        fail_msg: Configuración de alerting inválida
+
+    - name: Crear directorio de respaldo declarativo
+      ansible.builtin.file:
+        path: "{{ grafana_alerting_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Copiar definición original saneada
+      ansible.builtin.copy:
+        src: ../alerting/grafana-alerting-sanitized.json
+        dest: "{{ grafana_alerting_dir }}/grafana-alerting-sanitized.json"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Copiar restaurador de Grafana
+      ansible.builtin.copy:
+        src: ../tools/restore_grafana_alerting.py
+        dest: "{{ grafana_alerting_dir }}/restore_grafana_alerting.py"
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Exigir confirmación explícita antes de activar notificaciones
+      ansible.builtin.assert:
+        that:
+          - var_grafana_alerting_authorize_notifications | default(false) | bool
+        fail_msg: Activación no autorizada. Mantener modo stage sin notificaciones
+      when: grafana_alerting_mode == 'activate'
+
+    - name: Preparar o activar reglas reales por API
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ grafana_alerting_dir }}/restore_grafana_alerting.py"
+          - --source
+          - "{{ grafana_alerting_dir }}/grafana-alerting-sanitized.json"
+          - --port
+          - "{{ var_grafana_port | string }}"
+          - --host
+          - "{{ var_grafana_bind_address | default('127.0.0.1') }}"
+          - --mode
+          - "{{ grafana_alerting_mode }}"
+          - --folder-title
+          - "{{ var_grafana_alerting_folder_title | default('Infrastructure') }}"
+      environment:
+        GRAFANA_ALERTING_USERNAME: "{{ var_grafana_admin_user }}"
+        GRAFANA_ALERTING_PASSWORD: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ADMIN_PASSWORD') }}"
+        VAR_GRAFANA_ALERTING_CONTACTS_JSON: "{{ lookup('ansible.builtin.env', 'VAR_GRAFANA_ALERTING_CONTACTS_JSON') }}"
+      register: alerting_result
+      changed_when: "(alerting_result.stdout | from_json).created | int > 0 or (alerting_result.stdout | from_json).updated | int > 0 or (alerting_result.stdout | from_json).contacts_created | int > 0"
+      no_log: true
+      diff: false
+
+    - name: Resumen seguro
+      ansible.builtin.debug:
+        msg: "Alerting {{ (alerting_result.stdout | from_json).mode }}; reglas 10; nuevas {{ (alerting_result.stdout | from_json).created }}; actualizadas {{ (alerting_result.stdout | from_json).updated }}; laboratorio pausado; notificaciones {{ 'autorizadas' if grafana_alerting_mode == 'activate' else 'sin activar' }}"

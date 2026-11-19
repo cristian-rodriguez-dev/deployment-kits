@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+
+import json
+import logging
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+WEBHOOK_URL = "http://security-triage-bot:8080/webhook/wazuh"
+TOKEN_FILE = Path("/var/ossec/etc/triage-bot.token")
+LOG_FILE = "/var/ossec/logs/integrations.log"
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s security-triage: %(levelname)s %(message)s",
+)
+
+
+def main():
+    if len(sys.argv) < 2:
+        raise ValueError("Missing Wazuh alert file")
+
+    alert = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+
+    level = int(alert.get("rule", {}).get("level", 0))
+    if level < 10:
+        return
+
+    token = TOKEN_FILE.read_text(encoding="utf-8").strip()
+
+    if not token:
+        raise ValueError("Empty webhook token")
+
+    request = urllib.request.Request(
+        WEBHOOK_URL,
+        data=json.dumps(alert).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=45) as response:
+        response.read()
+
+    logging.info(
+        "Alert forwarded: rule=%s level=%s",
+        alert.get("rule", {}).get("id"),
+        level,
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        logging.error(
+            "Alert forwarding failed: %s",
+            type(exc).__name__,
+        )
+        sys.exit(1)

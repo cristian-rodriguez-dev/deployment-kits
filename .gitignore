@@ -1,4 +1,4 @@
-﻿# ============================================
+# ============================================
 # Python y tests
 # ============================================
 __pycache__/
@@ -55,3 +55,12 @@ venv/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+/ubuntu-26.04/playbooks/group_vars/all.yml
+/ubuntu-26.04-anterior/
+/ubuntu-26.04/acceso-https/
+
+# Security Triage en Ubuntu 26.04: runtime privado
+.local-secrets/
+asset_inventory.json
+auth.json

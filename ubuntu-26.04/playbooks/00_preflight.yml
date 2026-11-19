@@ -1,0 +1,33 @@
+---
+- name: 00 | Preflight monohost Ubuntu 26.04
+  hosts: docker_servers
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Confirmar SO, K3s y conectividad sudo
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '26.04'
+          - groups.get('docker_servers', []) | length == 1
+          - groups.get('wazuh-servers', []) | length == 1
+          - groups.get('prometheus-servers', []) | length == 1
+          - groups.get('grafana-servers', []) | length == 1
+          - groups.get('k3s-servers', []) | length == 1
+          - groups['docker_servers'][0] == groups['wazuh-servers'][0]
+          - groups['docker_servers'][0] == groups['prometheus-servers'][0]
+          - groups['docker_servers'][0] == groups['grafana-servers'][0]
+          - groups['docker_servers'][0] == groups['k3s-servers'][0]
+          - var_grafana_install_dir is defined
+          - var_wazuh_install_dir is defined
+          - var_prometheus_install_dir is defined
+          - var_monitorizacion_network is defined
+          - var_ubuntu26_cluster_name is defined
+    - name: Confirmar AWX y K3s local
+      ansible.builtin.command:
+        argv: [k3s, kubectl, -n, awx, get, deployment, awx-task]
+      changed_when: false
+    - name: Comprobar disponibilidad Docker del repositorio
+      ansible.builtin.command:
+        argv: [getent, hosts, download.docker.com]
+      changed_when: false

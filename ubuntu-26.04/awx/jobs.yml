@@ -1,0 +1,172 @@
+version: 2
+plataforma: ubuntu-26.04
+inventario: Ubuntu 26.04 - Instalacion limpia
+proyecto: deployment-kits
+credencial_machine: SSH - Ubuntu 26.04
+plantillas:
+- id: '00'
+  nombre: 26.04 - 00 Preflight
+  playbook: ubuntu-26.04/playbooks/00_preflight.yml
+  estado: pendiente_prueba_real
+  depende_de: []
+  variables: {}
+- id: '01'
+  nombre: 26.04 - 01 Instalar Docker
+  playbook: ubuntu-26.04/playbooks/01_instalar_docker.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '00'
+  variables: {}
+- id: '02'
+  nombre: 26.04 - 02 Instalar Wazuh
+  playbook: ubuntu-26.04/playbooks/02_instalar_wazuh.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '01'
+  variables: {}
+- id: '03'
+  nombre: 26.04 - 03 Configurar Wazuh
+  playbook: ubuntu-26.04/playbooks/03_configurar_wazuh.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '02'
+  variables: {}
+- id: '04'
+  nombre: 26.04 - 04 Instalar Prometheus
+  playbook: ubuntu-26.04/playbooks/04_instalar_prometheus.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '03'
+  variables: {}
+- id: '05'
+  nombre: 26.04 - 05 Instalar Grafana
+  playbook: ubuntu-26.04/playbooks/05_instalar_grafana.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '04'
+  variables: {}
+- id: 08
+  nombre: 26.04 - 08 Observabilidad K3s
+  playbook: ubuntu-26.04/playbooks/08_observabilidad_k3s.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '05'
+  variables: {}
+- id: 08B
+  nombre: 26.04 - 08B Alloy Host
+  playbook: ubuntu-26.04/playbooks/08b_alloy_host.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - 08
+  variables: {}
+- id: 09A
+  nombre: 26.04 - 09A Acceso limitado K3s
+  playbook: ubuntu-26.04/playbooks/09a_preparar_acceso_k3s.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - 08B
+  variables: {}
+- id: 09B
+  nombre: 26.04 - 09B K3s y Prometheus
+  playbook: ubuntu-26.04/playbooks/09b_integrar_k3s_prometheus.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - 09A
+  variables: {}
+- id: 09D
+  nombre: 26.04 - 09D cAdvisor Kubelet
+  playbook: ubuntu-26.04/playbooks/09d_integrar_kubelet_cadvisor.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - 09B
+  variables: {}
+- id: 09C
+  nombre: 26.04 - 09C Loki y Grafana
+  playbook: ubuntu-26.04/playbooks/09c_integrar_loki_grafana.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - 09D
+  variables: {}
+- id: 09E
+  nombre: 26.04 - 09E Puente Traefik Loki Wazuh
+  playbook: ubuntu-26.04/playbooks/09e_traefik_wazuh_bridge.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - 09C
+  variables: {}
+- id: '10'
+  nombre: 26.04 - 10 Dashboards originales
+  playbook: ubuntu-26.04/playbooks/10_configurar_dashboards_grafana.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - 09E
+  variables: {}
+- id: '11'
+  nombre: 26.04 - 11 GeoIP Wazuh
+  playbook: ubuntu-26.04/playbooks/11_geoip_wazuh.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '10'
+  variables: {}
+- id: '12'
+  nombre: 26.04 - 12 HTTPS octavio.internal
+  playbook: ubuntu-26.04/playbooks/12_acceso_https_octavio.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '11'
+  variables: {}
+- id: '13'
+  nombre: 26.04 - 13 Validacion nucleo
+  playbook: ubuntu-26.04/playbooks/13_validar_nucleo.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '12'
+  variables: {}
+- id: '14'
+  nombre: 26.04 - 14 Triage Bot original
+  playbook: ubuntu-26.04/playbooks/14_instalar_triage_bot.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '13'
+  variables: {}
+- id: '15'
+  nombre: 26.04 - 15 Metricas Security Triage
+  playbook: ubuntu-26.04/playbooks/15_integrar_metricas_triage.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '14'
+  variables: {}
+- id: '16'
+  nombre: 26.04 - 16 Validar Triage
+  playbook: ubuntu-26.04/playbooks/16_validar_triage.yml
+  estado: pendiente_prueba_real
+  depende_de:
+  - '15'
+  variables: {}
+- id: '18'
+  nombre: 26.04 - 18 Grafana Alerting original (preparación segura)
+  playbook: ubuntu-26.04/playbooks/18_grafana_alerting_original.yml
+  estado: stage_sin_notificaciones
+  depende_de:
+  - '16'
+  variables: {}
+- id: '06'
+  nombre: 26.04 - 06 Instalar agentes monitorización
+  playbook: ubuntu-26.04/playbooks/06_instalar_agentes.yml
+  estado: opcional_agentes_remotos
+  depende_de: []
+  variables: {}
+- id: '07'
+  nombre: 26.04 - 07 Configurar agentes Prometheus
+  playbook: ubuntu-26.04/playbooks/07_configurar_agentes_prometheus.yml
+  estado: opcional_agentes_remotos
+  depende_de:
+  - '06'
+  variables: {}
+- id: '17'
+  nombre: 26.04 - 17 Preparar piloto SSH remoto (manual)
+  playbook: ubuntu-26.04/playbooks/17_preparar_piloto_ssh.yml
+  estado: opcional_preparacion_sin_activar
+  depende_de:
+  - '06'
+  variables: {}

@@ -1,0 +1,5 @@
+DB_PATH=/data/incidents.db
+TELEGRAM_ENABLED={{ (var_triage_telegram_enabled | default(false) | bool) | ternary('true', 'false') }}
+TELEGRAM_BOT_TOKEN={{ triage_telegram_token | to_json }}
+TELEGRAM_CHAT_ID={{ triage_telegram_chat_id | to_json }}
+DASHBOARD_URL={{ (var_triage_dashboard_url | default('')) | to_json }}
