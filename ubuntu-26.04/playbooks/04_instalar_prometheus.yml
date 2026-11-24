@@ -47,9 +47,7 @@
   - name: Crear archivo inicial de scrapes externos
     ansible.builtin.copy:
       dest: '{{ var_prometheus_install_dir }}/prometheus/scrape.d/empty.yml'
-      content: '[]
-
-        '
+      content: "scrape_configs: []\n"
       force: false
       mode: '0644'
   - name: Inicializar targets vacíos si no existen
