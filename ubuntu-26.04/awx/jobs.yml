@@ -20,7 +20,7 @@ plantillas:
 - id: '02'
   nombre: 26.04 - 02 Instalar Wazuh
   playbook: ubuntu-26.04/playbooks/02_instalar_wazuh.yml
-  estado: pendiente_prueba_real
+  estado: probado y funcionando
   depende_de:
   - '01'
   variables: {}
