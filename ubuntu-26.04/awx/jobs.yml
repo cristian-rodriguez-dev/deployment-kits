@@ -27,14 +27,14 @@ plantillas:
 - id: '03'
   nombre: 26.04 - 03 Configurar Wazuh
   playbook: ubuntu-26.04/playbooks/03_configurar_wazuh.yml
-  estado: pendiente_prueba_real
+  estado: probado y funcionando
   depende_de:
   - '02'
   variables: {}
 - id: '04'
   nombre: 26.04 - 04 Instalar Prometheus
   playbook: ubuntu-26.04/playbooks/04_instalar_prometheus.yml
-  estado: pendiente_prueba_real
+  estado: probado y funcionando
   depende_de:
   - '03'
   variables: {}

@@ -1,13 +1,3 @@
-# Pilas Observabilidad — `deployment-kits`
-
-**Ruta activa para Ubuntu Server 26.04:** [Guía única de instalación limpia](GUIA_UNICA_UBUNTU26.md) y [directorio de despliegue](ubuntu-26.04/README.md). Incluye AWX, Wazuh, Prometheus, Grafana, Loki, Alloy, GeoIP y el código original de Security Triage Bot, conectado mediante el workflow de 19 Jobs. La ruta nueva todavía no ha sido probada de extremo a extremo en Ubuntu 26.04.
-
-## Laboratorio heredado Ubuntu 24.04
-
-Repositorio de automatización, configuración y verificación del **laboratorio antiguo** de seguridad y observabilidad. Es independiente de `infrastructure-platform` y sigue siendo la referencia operativa del entorno existente.
-
-> **Estado:** laboratorio funcional con componentes instalados, auditorías y pilotos. **No** existe todavía un workflow único verificado que reconstruya toda la plataforma desde cero.
-
 ## Componentes y responsabilidades
 
 | Área | Componentes | Función |
@@ -42,17 +32,6 @@ deployment-kits/
 └── tools/                       # Herramientas locales de verificación
 ```
 
-## Workflows y playbooks existentes
-
-La automatización inicial incluía:
-
-1. **Despliegue instalación (01–05):** `instalar_docker.yml` → `instalar_wazuh.yml` → `configurar_wazuh.yml` → `instalar_prometheus.yml` → `instalar_grafana.yml`.
-2. **Despliegue Agentes (06–07):** `instalar_agentes_monitorizacion.yml` → `configurar_agentes_prometheus.yml`.
-
-Los archivos se encuentran en `monitorizacion/playbooks/`. Hay también playbooks independientes de observabilidad K3s, Alloy Host, dashboards, GeoIP, alertas de Grafana, backups/restauración, auditorías, Traefik y Active Response.
-
-**Precaución:** estos workflows heredados **no** constituyen todavía una reconstrucción integral validada. `instalar_observabilidad_k3s.yml` prepara accesos Kubernetes que utiliza el Prometheus antiguo; esta dependencia debe revisarse en el orden de instalación.
-
 ## Modos de operación y seguridad
 
 - **Instalación limpia:** ejecutar únicamente en hosts nuevos y después de validar variables, rutas, puertos y recursos.
@@ -77,18 +56,3 @@ Nunca ejecutar `docker compose down -v` en una instalación con datos que deban 
 - [GeoIP de Wazuh](monitorizacion/GEOIP_WAZUH_AWX.md)
 - [Traefik, Loki y Wazuh](monitorizacion/docs/TRAEFIK_LOKI_WAZUH.md)
 - [Integración de métricas del bot](monitorizacion/TRIAGE_METRICS_AWX.md)
-
-## Fase actual: instalación limpia antes que adopción
-
-Objetivo de la fase: automatizar **instalaciones desde cero en Ubuntu Server 24.04**, probar un workflow maestro reproducible en VMs nuevas, y después preparar compatibilidad 26.04. La adopción y los cambios en instalaciones existentes quedan para más adelante.
-
-**Job 01 Docker:** se ha adaptado `monitorizacion/playbooks/instalar_docker.yml` para exigir confirmación explícita, rechazar hosts ajenos y evitar reinicios sobre configuraciones existentes. Ver [guía de instalación limpia Docker 24.04](monitorizacion/docs/DOCKER_INSTALACION_LIMPIA_2404.md) y [variables de ejemplo](monitorizacion/examples/variables_docker_clean_2404.yml). **Nunca probar el Job 01 en el laboratorio actual.**
-
-## Pendiente para el workflow maestro
-
-- Auditar preflight, inventarios, credenciales y dependencias antes de construir el workflow.
-- Separar las rutas **instalación limpia**, **inspección/adopción**, **mantenimiento** y **recuperación**; nunca encadenarlas indiscriminadamente.
-- Incorporar la instalación automatizada del bot desde su repositorio propio, creación/configuración inicial de GeoIP, alerting y verificaciones end-to-end cuando se implementen.
-- Validar idempotencia, retención de datos, fuentes de logs, consultas de datasources, paneles, targets, notificación y recuperación.
-
-**Regla de mantenimiento:** conservar aquí solo código reutilizable, pruebas y documentación vigente. Los artefactos de un solo uso, instrucciones de parches ya aplicados, cachés, secretos y datos locales deben quedar fuera del repositorio.
