@@ -7,13 +7,13 @@ plantillas:
 - id: '00'
   nombre: 26.04 - 00 Preflight
   playbook: ubuntu-26.04/playbooks/00_preflight.yml
-  estado: pendiente_prueba_real
+  estado: probado y funcionando
   depende_de: []
   variables: {}
 - id: '01'
   nombre: 26.04 - 01 Instalar Docker
   playbook: ubuntu-26.04/playbooks/01_instalar_docker.yml
-  estado: pendiente_prueba_real
+  estado: probado y funcionando
   depende_de:
   - '00'
   variables: {}
